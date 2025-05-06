@@ -147,9 +147,14 @@ func (p *Policy) SaveNeurons() error {
 		if err != nil {
 			return err
 		}
-		if err = ff.CreateAndWrite("./history/blah.txt", data); err != nil {
+        file, err := os.CreateTemp("./history/", "*.txt")
+		if err != nil {
 			return err
 		}
+        _, err = file.Write(data)
+        if err != nil {
+            return err
+        }
 	}
 	err = os.WriteFile("./init/latest.txt", bytes, 0666)
 	if err != nil {
