@@ -83,10 +83,17 @@ type Neuron struct {
 
 func main() {
 	//training cycle:
-	//->run an episode that should accept advantage data to alter it's weights.
-	//->gather log file data and calculate advantage
-	//->pass into next episode
-	//->repeat
+	//1. initialize episode 
+    //  ->load the network 
+    //  ->use advantage to alter weights.
+    //  ->reset environment
+    //2. get action from policy network
+    //3. apply action to environment
+    //4. calculate reward
+    //5. run values network
+	//6. gather log file data and calculate advantage
+    //7. save updated network
+	//8. repeat
 
 	//reinforcement should be at the start
 	env := Environment{}
