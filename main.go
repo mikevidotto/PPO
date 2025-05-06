@@ -1,9 +1,14 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
+	"github.com/mikevidotto/ff/ff"
+	"log"
 	"math"
 	"math/rand"
+	"os"
+	"reflect"
 )
 
 // training loop:
@@ -88,31 +93,101 @@ func main() {
 	env.Reset()
 
 	p := Policy{}
-	p.InitializeHiddenNeurons(15)
-	p.InitializeOutputNeurons(3, len(p.HiddenNeurons))
+	p, err := p.LoadNeurons()
+	if err != nil {
+		log.Fatal(err)
+	}
+	//p.InitializeHiddenNeurons(3)
+	//p.InitializeOutputNeurons(3, len(p.HiddenNeurons))
+	for _, neuron := range p.HiddenNeurons {
+		fmt.Println(neuron)
+	}
+	for _, neuron := range p.OutputNeurons {
+		fmt.Println(neuron)
+	}
 
 	outputs := p.OutputLayer(p.HiddenLayer(env.PlayerPosition))
 	probabilityDistribution := Softmax(outputs)
 
-	action := StochasticSample(probabilityDistribution, rand.Intn(100))
+	action := StochasticSample(probabilityDistribution)
 	if action == 2 {
 		fmt.Println("error getting action...")
 	}
-	fmt.Println(action)
+
+	storedPolicy, err := p.LoadNeurons()
+	if err != nil {
+		log.Fatal(err)
+	}
+	if !reflect.DeepEqual(p, storedPolicy) {
+		fmt.Println("Saving because changes have been made to Policy.")
+		err = p.SaveNeurons()
+		if err != nil {
+			log.Fatal(err)
+		}
+	} else {
+		fmt.Println("No changes made to Policy, therefore we won't update init file.")
+	}
+
+	fmt.Println("action:", action)
 	//apply action from probabilityDistribution
 
 	//compute reward. should be -1 by default and then check if we are on the target and reward 50 points if we are.
-
+    
+    //compute advantage and save data or something
 }
 
-func StochasticSample(vector []float64, randomNumber int) (action int) {
+func (p *Policy) SaveNeurons() error {
+	bytes, err := json.Marshal(p)
+	if err != nil {
+		return err
+	}
+	//create backup of current network data
+	if ff.FileExists("./init/latest.txt") {
+		data, err := os.ReadFile("./init/latest.txt")
+		if err != nil {
+			return err
+		}
+		if err = ff.CreateAndWrite("./history/blah.txt", data); err != nil {
+			return err
+		}
+	}
+	err = os.WriteFile("./init/latest.txt", bytes, 0666)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (p *Policy) LoadNeurons() (Policy, error) {
+	var savedNetwork Policy
+	file, err := os.Open("./init/latest.txt")
+	if err != nil {
+		return Policy{}, err
+	}
+	defer file.Close()
+
+	decoder := json.NewDecoder(file)
+	err = decoder.Decode(&savedNetwork)
+	if err != nil {
+		return Policy{}, err
+	}
+
+	return savedNetwork, nil
+}
+
+func StochasticSample(vector []float64) (action int) {
+	testsum := 0
 	var samples []int
 	for i, value := range vector {
 		integer := int(value * 100)
 		for range integer {
 			samples = append(samples, i)
 		}
+		testsum += integer
 	}
+	randomNumber := rand.Intn(len(samples) - 1)
+	fmt.Println("random number: ", randomNumber)
 	switch samples[randomNumber] {
 	case 1:
 		return -1
@@ -149,7 +224,6 @@ func (p *Policy) InitializeOutputNeurons(ncount, wcount int) {
 	for range ncount {
 		neuron := Neuron{}
 		neuron.Bias = rand.Float64()
-		fmt.Println(neuron.Bias)
 		for range wcount {
 			randomnumber := rand.Float64()
 			neuron.Weights = append(neuron.Weights, randomnumber)
@@ -169,13 +243,8 @@ func (env *Environment) Reset() {
 }
 
 func (p *Policy) HiddenLayer(input int) (vector []float64) {
-	fmt.Println("input : ", input)
 	for _, neuron := range p.HiddenNeurons {
-		fmt.Println("float64(input): ", float64(input))
-		fmt.Println("neuron.Weights[0]: ", neuron.Weights[0])
 		logit := (float64(input) * neuron.Weights[0]) + neuron.Bias
-		fmt.Println("logit: ", logit)
-		fmt.Println("TanH(logit): ", TanH(logit))
 		vector = append(vector, TanH(logit))
 	}
 	return vector
@@ -193,10 +262,5 @@ func (p *Policy) OutputLayer(hiddenVector []float64) (outputs []float64) {
 }
 
 func TanH(logit float64) float64 {
-	fmt.Println("-------------------------------------------")
-	fmt.Println(logit)
-	fmt.Println(math.Sinh(logit))
-	fmt.Println(math.Cosh(logit))
-	fmt.Println(math.Sinh(logit) / math.Cosh(logit))
 	return math.Sinh(logit) / math.Cosh(logit)
 }
