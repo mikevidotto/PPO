@@ -77,17 +77,51 @@ type Neuron struct {
 }
 
 func main() {
+	//training cycle:
+	//->run an episode that should accept advantage data to alter it's weights.
+	//->gather log file data and calculate advantage
+	//->pass into next episode
+	//->repeat
+
+	//reinforcement should be at the start
 	env := Environment{}
 	env.Reset()
 
 	p := Policy{}
-	p.InitializeHiddenNeurons(3)
+	p.InitializeHiddenNeurons(15)
 	p.InitializeOutputNeurons(3, len(p.HiddenNeurons))
 
 	outputs := p.OutputLayer(p.HiddenLayer(env.PlayerPosition))
 	probabilityDistribution := Softmax(outputs)
 
-	fmt.Println(probabilityDistribution)
+	action := StochasticSample(probabilityDistribution, rand.Intn(100))
+	if action == 2 {
+		fmt.Println("error getting action...")
+	}
+	fmt.Println(action)
+	//apply action from probabilityDistribution
+
+	//compute reward. should be -1 by default and then check if we are on the target and reward 50 points if we are.
+
+}
+
+func StochasticSample(vector []float64, randomNumber int) (action int) {
+	var samples []int
+	for i, value := range vector {
+		integer := int(value * 100)
+		for range integer {
+			samples = append(samples, i)
+		}
+	}
+	switch samples[randomNumber] {
+	case 1:
+		return -1
+	case 2:
+		return 1
+	case 0:
+		return 0
+	}
+	return 2
 }
 
 func Softmax(vector []float64) (probabilityDistribution []float64) {
@@ -102,20 +136,23 @@ func Softmax(vector []float64) (probabilityDistribution []float64) {
 }
 
 func (p *Policy) InitializeHiddenNeurons(count int) {
-	for i := range count {
+	for range count {
 		neuron := Neuron{}
-		neuron.Bias = float64(i)
-		neuron.Weights = append(neuron.Weights, float64(i))
+		neuron.Bias = rand.Float64()
+		randomnumber := rand.Float64()
+		neuron.Weights = append(neuron.Weights, randomnumber)
 		p.HiddenNeurons = append(p.HiddenNeurons, neuron)
 	}
 }
 
 func (p *Policy) InitializeOutputNeurons(ncount, wcount int) {
-	for i := range ncount {
+	for range ncount {
 		neuron := Neuron{}
-		neuron.Bias = float64(i)
-		for j := range wcount {
-			neuron.Weights = append(neuron.Weights, float64(j))
+		neuron.Bias = rand.Float64()
+		fmt.Println(neuron.Bias)
+		for range wcount {
+			randomnumber := rand.Float64()
+			neuron.Weights = append(neuron.Weights, randomnumber)
 		}
 		p.OutputNeurons = append(p.OutputNeurons, neuron)
 	}
@@ -132,8 +169,13 @@ func (env *Environment) Reset() {
 }
 
 func (p *Policy) HiddenLayer(input int) (vector []float64) {
+	fmt.Println("input : ", input)
 	for _, neuron := range p.HiddenNeurons {
+		fmt.Println("float64(input): ", float64(input))
+		fmt.Println("neuron.Weights[0]: ", neuron.Weights[0])
 		logit := (float64(input) * neuron.Weights[0]) + neuron.Bias
+		fmt.Println("logit: ", logit)
+		fmt.Println("TanH(logit): ", TanH(logit))
 		vector = append(vector, TanH(logit))
 	}
 	return vector
@@ -141,7 +183,7 @@ func (p *Policy) HiddenLayer(input int) (vector []float64) {
 
 func (p *Policy) OutputLayer(hiddenVector []float64) (outputs []float64) {
 	for _, neuron := range p.OutputNeurons {
-		summedWeights := 0.0
+		var summedWeights float64
 		for i, value := range hiddenVector {
 			summedWeights += (value * neuron.Weights[i])
 		}
@@ -151,5 +193,10 @@ func (p *Policy) OutputLayer(hiddenVector []float64) (outputs []float64) {
 }
 
 func TanH(logit float64) float64 {
+	fmt.Println("-------------------------------------------")
+	fmt.Println(logit)
+	fmt.Println(math.Sinh(logit))
+	fmt.Println(math.Cosh(logit))
+	fmt.Println(math.Sinh(logit) / math.Cosh(logit))
 	return math.Sinh(logit) / math.Cosh(logit)
 }
