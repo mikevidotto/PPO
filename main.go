@@ -12,6 +12,9 @@ import (
 )
 
 // training loop:
+// VALUES NETWORK
+// 1. estimate value of current state (x)
+//
 //
 // POLICY NETWORK
 // 1. feed current position (x) into policy network
@@ -67,13 +70,24 @@ type Environment struct {
 	MaxSteps       int
 }
 
-type Policy struct {
+type PPO struct {
+	Policy PolicyNetwork
+	Values ValuesNetwork
+}
+
+type NeuralNetwork interface {
+	LoadNeurons() error
+	SaveNeurons() error
+}
+
+type PolicyNetwork struct {
 	HiddenNeurons []Neuron
 	OutputNeurons []Neuron
 }
 
-type Values struct {
-	Weights []float64
+type ValuesNetwork struct {
+	HiddenNeurons []Neuron
+	OutputNeurons []Neuron
 }
 
 type Neuron struct {
@@ -83,37 +97,41 @@ type Neuron struct {
 
 func main() {
 	//training cycle:
-	//1. initialize episode 
-    //  ->load the network 
-    //  ->use advantage to alter weights.
-    //  ->reset environment
-    //2. get action from policy network
-    //3. apply action to environment
-    //4. calculate reward
-    //5. run values network
+	//1. initialize episode
+	//  ->load the network
+	//  ->use advantage to alter weights.
+	//  ->reset environment
+	//2. get action from policy network
+	//3. apply action to environment
+	//4. calculate reward
+	//5. run values network
 	//6. gather log file data and calculate advantage
-    //7. save updated network
+	//7. save updated network
 	//8. repeat
 
 	//reinforcement should be at the start
 	env := Environment{}
 	env.Reset()
 
-	p := Policy{}
-	p, err := p.LoadNeurons()
-	if err != nil {
-		log.Fatal(err)
+	ppo := PPO{}
+	ppo, err := ppo.Load()
+
+	outputs := ppo.Policy.OutputLayer(ppo.Policy.HiddenLayer(env.PlayerPosition))
+
+	for _, neuron := range ppo.Policy.HiddenNeurons {
+        fmt.Println("Policy Hidden: ", neuron)
 	}
-	//p.InitializeHiddenNeurons(3)
-	//p.InitializeOutputNeurons(3, len(p.HiddenNeurons))
-	for _, neuron := range p.HiddenNeurons {
-		fmt.Println(neuron)
+	for _, neuron := range ppo.Policy.OutputNeurons {
+		fmt.Println("Policy Output: ",neuron)
 	}
-	for _, neuron := range p.OutputNeurons {
-		fmt.Println(neuron)
+	for _, neuron := range ppo.Values.HiddenNeurons {
+		fmt.Println("values Hidden: ",neuron)
+	}
+	for _, neuron := range ppo.Values.OutputNeurons {
+		fmt.Println("values Output: ",neuron)
 	}
 
-	outputs := p.OutputLayer(p.HiddenLayer(env.PlayerPosition))
+	//outputs := p.OutputLayer(p.HiddenLayer(env.PlayerPosition))
 	probabilityDistribution := Softmax(outputs)
 
 	action := StochasticSample(probabilityDistribution)
@@ -121,13 +139,13 @@ func main() {
 		fmt.Println("error getting action...")
 	}
 
-	storedPolicy, err := p.LoadNeurons()
+	storedPPO, err := ppo.Load()
 	if err != nil {
 		log.Fatal(err)
 	}
-	if !reflect.DeepEqual(p, storedPolicy) {
+	if !reflect.DeepEqual(ppo, storedPPO) {
 		fmt.Println("Saving because changes have been made to Policy.")
-		err = p.SaveNeurons()
+		err = ppo.Save()
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -137,13 +155,14 @@ func main() {
 
 	fmt.Println("action:", action)
 	//apply action from probabilityDistribution
+	env.PlayerPosition += action
 
 	//compute reward. should be -1 by default and then check if we are on the target and reward 50 points if we are.
-    
-    //compute advantage and save data or something
+
+	//compute advantage and save data or something
 }
 
-func (p *Policy) SaveNeurons() error {
+func (p *PPO) Save() error {
 	bytes, err := json.Marshal(p)
 	if err != nil {
 		return err
@@ -154,14 +173,14 @@ func (p *Policy) SaveNeurons() error {
 		if err != nil {
 			return err
 		}
-        file, err := os.CreateTemp("./history/", "*.txt")
+		file, err := os.CreateTemp("./history/", "*.txt")
 		if err != nil {
 			return err
 		}
-        _, err = file.Write(data)
-        if err != nil {
-            return err
-        }
+		_, err = file.Write(data)
+		if err != nil {
+			return err
+		}
 	}
 	err = os.WriteFile("./init/latest.txt", bytes, 0666)
 	if err != nil {
@@ -171,21 +190,28 @@ func (p *Policy) SaveNeurons() error {
 	return nil
 }
 
-func (p *Policy) LoadNeurons() (Policy, error) {
-	var savedNetwork Policy
+func (p *PPO) Load() (PPO, error) {
+	var savedPPO PPO
+	if !ff.FileExists("./init/latest.txt") {
+		savedPPO.Policy.InitializeHiddenNeurons(3)
+		savedPPO.Policy.InitializeOutputNeurons(3, 3)
+		savedPPO.Values.InitializeHiddenNeurons(3)
+		savedPPO.Values.InitializeOutputNeurons(3, 3)
+        return savedPPO, nil
+	}
 	file, err := os.Open("./init/latest.txt")
 	if err != nil {
-		return Policy{}, err
+		return PPO{}, err
 	}
 	defer file.Close()
 
 	decoder := json.NewDecoder(file)
-	err = decoder.Decode(&savedNetwork)
+	err = decoder.Decode(&savedPPO)
 	if err != nil {
-		return Policy{}, err
+		return PPO{}, err
 	}
 
-	return savedNetwork, nil
+	return savedPPO, nil
 }
 
 func StochasticSample(vector []float64) (action int) {
@@ -222,7 +248,7 @@ func Softmax(vector []float64) (probabilityDistribution []float64) {
 	return probabilityDistribution
 }
 
-func (p *Policy) InitializeHiddenNeurons(count int) {
+func (p *PolicyNetwork) InitializeHiddenNeurons(count int) {
 	for range count {
 		neuron := Neuron{}
 		neuron.Bias = rand.Float64()
@@ -232,7 +258,29 @@ func (p *Policy) InitializeHiddenNeurons(count int) {
 	}
 }
 
-func (p *Policy) InitializeOutputNeurons(ncount, wcount int) {
+func (p *PolicyNetwork) InitializeOutputNeurons(ncount, wcount int) {
+	for range ncount {
+		neuron := Neuron{}
+		neuron.Bias = rand.Float64()
+		for range wcount {
+			randomnumber := rand.Float64()
+			neuron.Weights = append(neuron.Weights, randomnumber)
+		}
+		p.OutputNeurons = append(p.OutputNeurons, neuron)
+	}
+}
+
+func (p *ValuesNetwork) InitializeHiddenNeurons(count int) {
+	for range count {
+		neuron := Neuron{}
+		neuron.Bias = rand.Float64()
+		randomnumber := rand.Float64()
+		neuron.Weights = append(neuron.Weights, randomnumber)
+		p.HiddenNeurons = append(p.HiddenNeurons, neuron)
+	}
+}
+
+func (p *ValuesNetwork) InitializeOutputNeurons(ncount, wcount int) {
 	for range ncount {
 		neuron := Neuron{}
 		neuron.Bias = rand.Float64()
@@ -254,7 +302,7 @@ func (env *Environment) Reset() {
 	env.TargetPosition = target
 }
 
-func (p *Policy) HiddenLayer(input int) (vector []float64) {
+func (p *PolicyNetwork) HiddenLayer(input int) (vector []float64) {
 	for _, neuron := range p.HiddenNeurons {
 		logit := (float64(input) * neuron.Weights[0]) + neuron.Bias
 		vector = append(vector, TanH(logit))
@@ -262,7 +310,7 @@ func (p *Policy) HiddenLayer(input int) (vector []float64) {
 	return vector
 }
 
-func (p *Policy) OutputLayer(hiddenVector []float64) (outputs []float64) {
+func (p *PolicyNetwork) OutputLayer(hiddenVector []float64) (outputs []float64) {
 	for _, neuron := range p.OutputNeurons {
 		var summedWeights float64
 		for i, value := range hiddenVector {
