@@ -36,7 +36,7 @@ import (
 // 8. Log the transition data
 //
 // VALUE NETWORK
-// 1. pass x into values network
+// 1. pass updated state values network
 // 2. estimate the "value" of the given position based on reward
 // 3. Log the transition data for advantage calculation
 //
@@ -55,19 +55,25 @@ const (
 )
 
 type TransitionData struct {
-	PlayerPosition    int
-	Action            string
+	Steps []StepData
+}
+
+type StepData struct {
+	StatePosition     int //state
+	Action            int
 	ActionProbability float64
 	Reward            int
-	ValuePredicted    float64
-	TargetPosition    int
+	StateValue        float64 //value estimate of current state
 	Done              bool
+
+	NextStatePosition int //next state
+	StepIndex         int
+	DistanceToTarget  int
 }
 
 type Environment struct {
 	PlayerPosition int
 	TargetPosition int
-	MaxSteps       int
 }
 
 type PPO struct {
@@ -87,7 +93,7 @@ type PolicyNetwork struct {
 
 type ValuesNetwork struct {
 	HiddenNeurons []Neuron
-	OutputNeurons []Neuron
+	OutputNeuron  Neuron
 }
 
 type Neuron struct {
@@ -110,26 +116,35 @@ func main() {
 	//8. repeat
 
 	//reinforcement should be at the start
+	//  ->load environment
+	//  ->load the network
 	env := Environment{}
 	env.Reset()
+	env, err := env.Load()
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	ppo := PPO{}
-	ppo, err := ppo.Load()
+	ppo, err = ppo.Load()
+	//run values network for current state
+	estimatedvalue := ppo.Values.OutputLayer(ppo.Values.HiddenLayer(env.PlayerPosition))
+	fmt.Println("estimated value of current state: ", estimatedvalue)
+
+	//run policy network
 
 	outputs := ppo.Policy.OutputLayer(ppo.Policy.HiddenLayer(env.PlayerPosition))
 
 	for _, neuron := range ppo.Policy.HiddenNeurons {
-        fmt.Println("Policy Hidden: ", neuron)
+		fmt.Println("Policy Hidden: ", neuron)
 	}
 	for _, neuron := range ppo.Policy.OutputNeurons {
-		fmt.Println("Policy Output: ",neuron)
+		fmt.Println("Policy Output: ", neuron)
 	}
 	for _, neuron := range ppo.Values.HiddenNeurons {
-		fmt.Println("values Hidden: ",neuron)
+		fmt.Println("values Hidden: ", neuron)
 	}
-	for _, neuron := range ppo.Values.OutputNeurons {
-		fmt.Println("values Output: ",neuron)
-	}
+	fmt.Println("values Output: ", ppo.Values.OutputNeuron)
 
 	//outputs := p.OutputLayer(p.HiddenLayer(env.PlayerPosition))
 	probabilityDistribution := Softmax(outputs)
@@ -160,6 +175,28 @@ func main() {
 	//compute reward. should be -1 by default and then check if we are on the target and reward 50 points if we are.
 
 	//compute advantage and save data or something
+}
+
+func (env *Environment) Load() (Environment, error) {
+	var savedEnvironment Environment
+
+	if !ff.FileExists("./init/latest.txt") {
+		//default values
+		return savedEnvironment, nil
+	}
+	file, err := os.Open("./init/latest.txt")
+	if err != nil {
+		return Environment{}, err
+	}
+	defer file.Close()
+
+	decoder := json.NewDecoder(file)
+	err = decoder.Decode(&savedEnvironment)
+	if err != nil {
+		return Environment{}, err
+	}
+
+	return savedEnvironment, nil
 }
 
 func (p *PPO) Save() error {
@@ -196,8 +233,8 @@ func (p *PPO) Load() (PPO, error) {
 		savedPPO.Policy.InitializeHiddenNeurons(3)
 		savedPPO.Policy.InitializeOutputNeurons(3, 3)
 		savedPPO.Values.InitializeHiddenNeurons(3)
-		savedPPO.Values.InitializeOutputNeurons(3, 3)
-        return savedPPO, nil
+		savedPPO.Values.InitializeOutputNeurons(3)
+		return savedPPO, nil
 	}
 	file, err := os.Open("./init/latest.txt")
 	if err != nil {
@@ -280,26 +317,34 @@ func (p *ValuesNetwork) InitializeHiddenNeurons(count int) {
 	}
 }
 
-func (p *ValuesNetwork) InitializeOutputNeurons(ncount, wcount int) {
-	for range ncount {
-		neuron := Neuron{}
-		neuron.Bias = rand.Float64()
-		for range wcount {
-			randomnumber := rand.Float64()
-			neuron.Weights = append(neuron.Weights, randomnumber)
-		}
-		p.OutputNeurons = append(p.OutputNeurons, neuron)
+func (v *ValuesNetwork) InitializeOutputNeurons(wcount int) {
+	v.OutputNeuron.Bias = rand.Float64()
+	for range wcount {
+		randomnumber := rand.Float64()
+		v.OutputNeuron.Weights = append(v.OutputNeuron.Weights, randomnumber)
 	}
 }
 
-func (env *Environment) Move(position int) {
-
-}
-
 func (env *Environment) Reset() {
-	env.MaxSteps = maxSteps
 	env.PlayerPosition = rand.Intn(100)
 	env.TargetPosition = target
+}
+
+func (v *ValuesNetwork) HiddenLayer(input int) (vector []float64) {
+	for _, neuron := range v.HiddenNeurons {
+		logit := (float64(input) * neuron.Weights[0]) + neuron.Bias
+		vector = append(vector, logit)
+	}
+
+	return vector
+}
+
+func (v *ValuesNetwork) OutputLayer(hiddenVector []float64) float64 {
+	var summedWeights float64
+	for i, value := range hiddenVector {
+		summedWeights += (value * v.OutputNeuron.Weights[i])
+	}
+	return summedWeights + v.OutputNeuron.Bias
 }
 
 func (p *PolicyNetwork) HiddenLayer(input int) (vector []float64) {
