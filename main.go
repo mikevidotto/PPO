@@ -172,7 +172,7 @@ func main() {
 		}
 
 		//compute reward. should be -1 by default and then check if we are on the target and reward 50 points if we are.
-		step.Reward = -1
+		step.Reward += -1
 		if env.PlayerPosition == target {
 			step.Reward += 50
 		}
@@ -213,7 +213,7 @@ func main() {
 
 
 	for _, step := range Episode.Steps {
-		fmt.Printf("step: %d, x: %d, %d units to target, V(%d): %f action: %d, action prob: %f, reward: %d, done:  %t\n", step.StepIndex, step.StatePosition, step.DistanceToTarget, step.StatePosition, step.StateValue, step.Action, step.ActionProbability, step.Reward, step.Done)
+		fmt.Printf("step: %2d, x: %2d, %4d units to target, V(%d): %4f action: %2d, action prob: %4f, reward: %2d, done:  %4t\n", step.StepIndex, step.StatePosition, step.DistanceToTarget, step.StatePosition, step.StateValue, step.Action, step.ActionProbability, step.Reward, step.Done)
 		//fmt.Printf("Step %d \nx position: %d: %d units to target(50) \nstate value: %f \nAction: %d \nActionProbability: %f\nReward: %d\nDone: %t\n-----------------------------------------------\n", step.StepIndex, step.StatePosition, step.DistanceToTarget, step.StateValue, step.Action, step.ActionProbability, step.Reward, step.Done)
 	}
 }
