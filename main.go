@@ -48,7 +48,7 @@ import (
 // 3. Store it batch training
 
 const (
-	maxSteps    = 20
+	maxSteps    = 50
 	maxPosition = 100
 	minPosition = 0
 	target      = 50
@@ -59,16 +59,16 @@ type TransitionData struct {
 }
 
 type StepData struct {
-	StatePosition     int //state
-	Action            int
-	ActionProbability float64
-	Reward            int
-	StateValue        float64 //value estimate of current state
-	Done              bool
+	StateValue float64 //result of V(x)
 
-	NextStatePosition int //next state
-	StepIndex         int
-	DistanceToTarget  int
+	StatePosition     int     //current position: x
+	Action            int     // left: -1, stay: 0 or right: 1
+	ActionProbability float64 //result of P(x)
+	Reward            int     //-1 for each step, +50 for reaching target
+	Done              bool    //true if x = target
+
+	StepIndex        int //increments each step
+	DistanceToTarget int //target - current position
 }
 
 type Environment struct {
@@ -118,86 +118,171 @@ func main() {
 	//reinforcement should be at the start
 	//  ->load environment
 	//  ->load the network
+
+	Episode := TransitionData{}
+	step := StepData{}
+
 	env := Environment{}
 	env.Reset()
-	env, err := env.Load()
-	if err != nil {
-		log.Fatal(err)
-	}
 
-	ppo := PPO{}
-	ppo, err = ppo.Load()
-	//run values network for current state
-	estimatedvalue := ppo.Values.OutputLayer(ppo.Values.HiddenLayer(env.PlayerPosition))
-	fmt.Println("estimated value of current state: ", estimatedvalue)
+	//START EPISODE with 20 STEPS MAX
+	for range maxSteps {
+		if !step.Done {
 
-	//run policy network
+		//env, err := env.Load()
+		//if err != nil {
+		//	log.Fatal(err)
+		//}
+		step.Initialize()
+		step.StatePosition = env.PlayerPosition
+		step.DistanceToTarget = env.TargetPosition - step.StatePosition
 
-	outputs := ppo.Policy.OutputLayer(ppo.Policy.HiddenLayer(env.PlayerPosition))
+		ppo := PPO{}
+		ppo, err := ppo.Load()
+		//run values network for current state
+		estimatedvalue := ppo.Values.OutputLayer(ppo.Values.HiddenLayer(env.PlayerPosition))
+		step.StateValue = estimatedvalue
 
-	for _, neuron := range ppo.Policy.HiddenNeurons {
-		fmt.Println("Policy Hidden: ", neuron)
-	}
-	for _, neuron := range ppo.Policy.OutputNeurons {
-		fmt.Println("Policy Output: ", neuron)
-	}
-	for _, neuron := range ppo.Values.HiddenNeurons {
-		fmt.Println("values Hidden: ", neuron)
-	}
-	fmt.Println("values Output: ", ppo.Values.OutputNeuron)
+		//run policy network
 
-	//outputs := p.OutputLayer(p.HiddenLayer(env.PlayerPosition))
-	probabilityDistribution := Softmax(outputs)
+		outputs := ppo.Policy.OutputLayer(ppo.Policy.HiddenLayer(env.PlayerPosition))
 
-	action := StochasticSample(probabilityDistribution)
-	if action == 2 {
-		fmt.Println("error getting action...")
-	}
+		//outputs := p.OutputLayer(p.HiddenLayer(env.PlayerPosition))
+		probabilityDistribution := Softmax(outputs)
 
-	storedPPO, err := ppo.Load()
-	if err != nil {
-		log.Fatal(err)
-	}
-	if !reflect.DeepEqual(ppo, storedPPO) {
-		fmt.Println("Saving because changes have been made to Policy.")
-		err = ppo.Save()
+		action, probability := StochasticSample(probabilityDistribution)
+		if action == 2 {
+			fmt.Println("error getting action...")
+		}
+
+		step.Action = action
+		step.ActionProbability = probability
+
+		if env.PlayerPosition == target {
+			step.Done = true
+		}
+
+		//apply action from probabilityDistribution
+		if env.PlayerPosition+action > 100 {
+			env.PlayerPosition = 100
+		} else if env.PlayerPosition+action < 0 {
+			env.PlayerPosition = 0
+		} else {
+			env.PlayerPosition += action
+		}
+
+		//compute reward. should be -1 by default and then check if we are on the target and reward 50 points if we are.
+		step.Reward = -1
+		if env.PlayerPosition == target {
+			step.Reward += 50
+		}
+
+		//compute advantage and save data or something
+
+		storedPPO, err := ppo.Load()
 		if err != nil {
 			log.Fatal(err)
 		}
-	} else {
-		fmt.Println("No changes made to Policy, therefore we won't update init file.")
+		if !reflect.DeepEqual(ppo, storedPPO) {
+			err = ppo.Save()
+			if err != nil {
+				log.Fatal(err)
+			}
+		}
+
+		//storedEnv, err := env.Load()
+		//if err != nil {
+		//	log.Fatal(err)
+		//}
+		//if !reflect.DeepEqual(env, storedEnv) {
+		//	fmt.Println("Saving because changes have been made to the Environment.")
+		//	err = env.Save()
+		//	if err != nil {
+		//		log.Fatal(err)
+		//	}
+		//} else {
+		//	fmt.Println("No changes made to the Environment, therefore we won't update init file.")
+		//}
+
+		Episode.Steps = append(Episode.Steps, step)
+		step.StepIndex++
+        }
 	}
 
-	fmt.Println("action:", action)
-	//apply action from probabilityDistribution
-	env.PlayerPosition += action
+    //log/store the episode data to calculate the advantage and return
 
-	//compute reward. should be -1 by default and then check if we are on the target and reward 50 points if we are.
 
-	//compute advantage and save data or something
+	for _, step := range Episode.Steps {
+		fmt.Printf("step: %d, x: %d, %d units to target, V(%d): %f action: %d, action prob: %f, reward: %d, done:  %t\n", step.StepIndex, step.StatePosition, step.DistanceToTarget, step.StatePosition, step.StateValue, step.Action, step.ActionProbability, step.Reward, step.Done)
+		//fmt.Printf("Step %d \nx position: %d: %d units to target(50) \nstate value: %f \nAction: %d \nActionProbability: %f\nReward: %d\nDone: %t\n-----------------------------------------------\n", step.StepIndex, step.StatePosition, step.DistanceToTarget, step.StateValue, step.Action, step.ActionProbability, step.Reward, step.Done)
+	}
 }
 
-func (env *Environment) Load() (Environment, error) {
-	var savedEnvironment Environment
+func (data *StepData) Initialize() {
 
-	if !ff.FileExists("./init/latest.txt") {
-		//default values
-		return savedEnvironment, nil
-	}
-	file, err := os.Open("./init/latest.txt")
-	if err != nil {
-		return Environment{}, err
-	}
-	defer file.Close()
+	//data.StatePosition = 0
+	//data.DistanceToTarget = 0
+	//data.StateValue = 0.0
 
-	decoder := json.NewDecoder(file)
-	err = decoder.Decode(&savedEnvironment)
-	if err != nil {
-		return Environment{}, err
-	}
+	//data.Action = 0
+	//data.ActionProbability = 0.0
 
-	return savedEnvironment, nil
+	//data.Reward = 0
+
+	//data.StepIndex = 0
+	//data.Done = false
 }
+
+//func (env *Environment) Load() (Environment, error) {
+//	var savedEnvironment Environment
+//
+//	if !ff.FileExists("./init/env/latest.txt") {
+//		//reset to default values
+//		savedEnvironment.Reset()
+//		return savedEnvironment, nil
+//	}
+//	file, err := os.Open("./init/env/latest.txt")
+//	if err != nil {
+//		return Environment{}, err
+//	}
+//	defer file.Close()
+//
+//	decoder := json.NewDecoder(file)
+//	err = decoder.Decode(&savedEnvironment)
+//	if err != nil {
+//		return Environment{}, err
+//	}
+//
+//	return savedEnvironment, nil
+//}
+//
+//func (env *Environment) Save() error {
+//	bytes, err := json.Marshal(env)
+//	if err != nil {
+//		return err
+//	}
+//	//create backup of current network data
+//	if ff.FileExists("./init/env/latest.txt") {
+//		data, err := os.ReadFile("./init/env/latest.txt")
+//		if err != nil {
+//			return err
+//		}
+//		file, err := os.CreateTemp("./history/env/", "*.txt")
+//		if err != nil {
+//			return err
+//		}
+//		_, err = file.Write(data)
+//		if err != nil {
+//			return err
+//		}
+//	}
+//	err = os.WriteFile("./init/env/latest.txt", bytes, 0666)
+//	if err != nil {
+//		return err
+//	}
+//
+//	return nil
+//}
 
 func (p *PPO) Save() error {
 	bytes, err := json.Marshal(p)
@@ -205,12 +290,12 @@ func (p *PPO) Save() error {
 		return err
 	}
 	//create backup of current network data
-	if ff.FileExists("./init/latest.txt") {
-		data, err := os.ReadFile("./init/latest.txt")
+	if ff.FileExists("./init/ppo/latest.txt") {
+		data, err := os.ReadFile("./init/ppo/latest.txt")
 		if err != nil {
 			return err
 		}
-		file, err := os.CreateTemp("./history/", "*.txt")
+		file, err := os.CreateTemp("./history/ppo/", "*.txt")
 		if err != nil {
 			return err
 		}
@@ -219,7 +304,7 @@ func (p *PPO) Save() error {
 			return err
 		}
 	}
-	err = os.WriteFile("./init/latest.txt", bytes, 0666)
+	err = os.WriteFile("./init/ppo/latest.txt", bytes, 0666)
 	if err != nil {
 		return err
 	}
@@ -229,14 +314,14 @@ func (p *PPO) Save() error {
 
 func (p *PPO) Load() (PPO, error) {
 	var savedPPO PPO
-	if !ff.FileExists("./init/latest.txt") {
+	if !ff.FileExists("./init/ppo/latest.txt") {
 		savedPPO.Policy.InitializeHiddenNeurons(3)
 		savedPPO.Policy.InitializeOutputNeurons(3, 3)
 		savedPPO.Values.InitializeHiddenNeurons(3)
 		savedPPO.Values.InitializeOutputNeurons(3)
 		return savedPPO, nil
 	}
-	file, err := os.Open("./init/latest.txt")
+	file, err := os.Open("./init/ppo/latest.txt")
 	if err != nil {
 		return PPO{}, err
 	}
@@ -251,7 +336,7 @@ func (p *PPO) Load() (PPO, error) {
 	return savedPPO, nil
 }
 
-func StochasticSample(vector []float64) (action int) {
+func StochasticSample(vector []float64) (action int, probability float64) {
 	testsum := 0
 	var samples []int
 	for i, value := range vector {
@@ -262,16 +347,15 @@ func StochasticSample(vector []float64) (action int) {
 		testsum += integer
 	}
 	randomNumber := rand.Intn(len(samples) - 1)
-	fmt.Println("random number: ", randomNumber)
 	switch samples[randomNumber] {
-	case 1:
-		return -1
-	case 2:
-		return 1
 	case 0:
-		return 0
+		return 0, vector[0]
+	case 1:
+		return -1, vector[1]
+	case 2:
+		return 1, vector[2]
 	}
-	return 2
+	return 2, 2
 }
 
 func Softmax(vector []float64) (probabilityDistribution []float64) {
