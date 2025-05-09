@@ -67,6 +67,7 @@ type Neuron struct {
 }
 
 func main() {
+	CreateDirectories()
 	//training cycle:
 	//1. initialize episode
 	//  ->load the network
@@ -100,7 +101,7 @@ func main() {
 	for range maxSteps {
 		if !step.Done {
 
-			step.Reward = 0 //automatically -1 reward for each step taken
+			step.Reward = -1 //automatically -1 reward for each step taken
 
 			step.State = env.PlayerPosition
 			step.DistanceToTarget = target - env.PlayerPosition
@@ -138,68 +139,59 @@ func main() {
 			}
 
 			step.NextState = env.PlayerPosition
-
-			//compute reward. should be -1 if we are further from the target and 0 if we are closer to then check if we are on the target and reward 50 points if we are.
-			margin := (env.TargetPosition - env.PlayerPosition)
-			if margin < 0 {
-				if step.DistanceToTarget < 0 {
-					if (margin * -1) == (step.DistanceToTarget * -1) {
-                        step.Reward += 0
-					} else if (margin * -1) > (step.DistanceToTarget * -1) {
-						step.Reward += -1
-					} else {
-						step.Reward += 2
-					}
-
-				} else {
-					if (margin * -1) == step.DistanceToTarget {
-                        step.Reward += 0
-                    } else if (margin * -1) > step.DistanceToTarget {
-						step.Reward += -1
-					} else {
-						step.Reward += 2
-					}
-				}
-			} else {
-				if step.DistanceToTarget < 0 {
-					if margin == (step.DistanceToTarget * -1) {
-                        step.Reward += 0
-                    } else if margin > (step.DistanceToTarget * -1) {
-						step.Reward += -1
-					} else {
-						step.Reward += 2
-					}
-
-				} else {
-					if margin == step.DistanceToTarget {
-                        step.Reward += 0
-                    } else if margin > step.DistanceToTarget {
-						step.Reward += -1
-					} else {
-						step.Reward += 2
-					}
-
-				}
-			}
-			if env.PlayerPosition == target {
+			if step.NextState == target {
 				step.Reward += 50
-			}
+				step.Done = true
+			} else {
 
-			//compute advantage and save data or something
+				//compute reward. should be -1 if we are further from the target and 0 if we are closer to then check if we are on the target and reward 50 points if we are.
+				margin := (env.TargetPosition - env.PlayerPosition)
+				if margin < 0 {
+					if step.DistanceToTarget < 0 {
+						if (margin * -1) == (step.DistanceToTarget * -1) {
+							step.Reward += 0
+						} else if (margin * -1) > (step.DistanceToTarget * -1) {
+							step.Reward += -1
+						} else {
+							step.Reward += 2
+						}
 
-			storedPPO, err := ppo.Load()
-			if err != nil {
-				log.Fatal(err)
-			}
-			if !reflect.DeepEqual(ppo, storedPPO) {
-				err = ppo.Save()
-				if err != nil {
-					log.Fatal(err)
+					} else {
+						if (margin * -1) == step.DistanceToTarget {
+							step.Reward += 0
+						} else if (margin * -1) > step.DistanceToTarget {
+							step.Reward += -1
+						} else {
+							step.Reward += 2
+						}
+					}
+				} else {
+					if step.DistanceToTarget < 0 {
+						if margin == (step.DistanceToTarget * -1) {
+							step.Reward += 0
+						} else if margin > (step.DistanceToTarget * -1) {
+							step.Reward += -1
+						} else {
+							step.Reward += 2
+						}
+
+					} else {
+						if margin == step.DistanceToTarget {
+							step.Reward += 0
+						} else if margin > step.DistanceToTarget {
+							step.Reward += -1
+						} else {
+							step.Reward += 2
+						}
+
+					}
 				}
 			}
 
 			EpisodeData.Steps = append(EpisodeData.Steps, step)
 			step.StepIndex++
+			//compute advantage and save data or something
+
 		}
 	}
 
@@ -216,11 +208,43 @@ func main() {
 	//->function: populate a temp ppo and return it with the adjusted values
 	//->assign current ppo to this function before saving so that the old ppo is backed up before it is adjusted
 
+	storedPPO, err := ppo.Load()
+	if err != nil {
+		log.Fatal(err)
+	}
+	if !reflect.DeepEqual(ppo, storedPPO) {
+		err = ppo.Save()
+		if err != nil {
+			log.Fatal(err)
+		}
+	}
+
 	for _, step := range EpisodeData.Steps {
-		fmt.Printf("step: %2d, x: %2d, %4d units to target, V(%d): %4f action: %2d, action prob: %4f, nextposition: %2d, reward: %2d, done:  %4t\n", step.StepIndex, step.State, step.DistanceToTarget, step.State, step.StateValue, step.Action, step.ActionProbability, step.NextState, step.Reward, step.Done)
+		fmt.Printf("step: %2d, x: %2d -> %2d, %4d units to target, V(%d): %4f action: %2d, action prob: %4f, reward: %2d, done:  %4t\n", step.StepIndex, step.State, step.NextState, step.DistanceToTarget, step.State, step.StateValue, step.Action, step.ActionProbability, step.Reward, step.Done)
 
 		//fmt.Printf("Step %d \nx position: %d: %d units to target(50) \nstate value: %f \nAction: %d \nActionProbability: %f\nReward: %d\nDone: %t\n-----------------------------------------------\n", step.StepIndex, step.State, step.DistanceToTarget, step.StateValue, step.Action, step.ActionProbability, step.Reward, step.Done)
 	}
+}
+
+func CreateDirectories() {
+	transition := "./transitions"
+	transitionHistory := "./history/transitions"
+	init := "./init"
+	ppo := "./init/ppo"
+	CreateDirIfNotExist(transition)
+	CreateDirIfNotExist(transitionHistory)
+	CreateDirIfNotExist(init)
+	CreateDirIfNotExist(ppo)
+}
+
+func CreateDirIfNotExist(dir string) {
+	if _, err := os.Stat(dir); os.IsNotExist(err) {
+		err = os.MkdirAll(dir, 0666)
+		if err != nil {
+			log.Fatal(err)
+		}
+	}
+
 }
 
 func Returns(steps []StepData, ppo PPO) (finalreturns []float64) {
@@ -260,7 +284,6 @@ func Advantage(steps []StepData, ppo PPO, returns []float64) (advantages []float
 }
 
 func (td *TransitionData) SaveData() error {
-	fmt.Println("HELOLO???")
 	bytes, err := json.Marshal(td)
 	if err != nil {
 		return err
