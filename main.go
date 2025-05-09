@@ -28,12 +28,16 @@ type StepData struct {
 	State             int     //current position: x
 	Action            int     // left: -1, stay: 0 or right: 1
 	ActionProbability float64 //result of P(x)
+    LogProbability float64
 	NextState         int     // current position + action: x + action (-1, 0, 1)
 	Reward            int     //-1 for each step, +50 for reaching target
 	Done              bool    //true if x = target
 
 	StepIndex        int //increments each step
 	DistanceToTarget int //target - current position
+
+	Return    float64
+	Advantage float64
 }
 
 type Environment struct {
@@ -70,20 +74,44 @@ func main() {
 	CreateDirectories()
 	//training cycle:
 	//1. initialize episode
-	//  ->load the network
+	//  ->load the network's neurons
 	//  ->use advantage to alter weights.
 	//  ->reset environment
 	//2. get action from policy network
 	//3. apply action to environment
 	//4. calculate reward
 	//5. run values network
-	//6. gather log file data and calculate advantage
+	//6. calculate return and advantage
+	//  ->return: At = reward + discountvalue(0.99) * ((reward2 + discountvalue(0.99)) * reward3 + discountvalue(0.99)...
+	//  ->advantage = return(At) - estimated value of state at t( V(t) )
+	//6. get log value of... something. I think the policy network results?
 	//7. save updated network
 	//8. repeat
 
-	//reinforcement should be at the start
-	//  ->load environment
-	//  ->load the network
+    //initialize policy 
+    //run episode, collect transition data for ppo
+    //run training 
+    //update policy
+    
+
+    //NEXT STEPS!!!!!!!!!!!!!!!!!!!
+    // training.
+    //run each step of your stored transition data through the policy network
+    //step 1: x=5 -> x=6, action=1(right)
+    //->PolicyNetwork(5) results:
+    //  left   stay  right
+    //->(0.32, 0.32, 0.36)
+    //get the logprobability of the same action for that step
+    //log(0.36)
+    //get the ratio of both log probabilities
+    //->not sure how yet... (division?) if x=4, y=8 then x/y = 4/8 = 1/2, therefore 1:2 ratio
+    //multiply ratio by the advantage
+    //clip the result 
+    //take negative clipped value to get loss
+
+    //then take the loss for each step, sum them up and get the average.
+    //feed the average into an optimizer that adjusts the weights of the policy network.
+    //fun stuff!
 
 	EpisodeData := TransitionData{}
 	step := StepData{}
@@ -119,11 +147,12 @@ func main() {
 
 			action, probability := StochasticSample(probabilityDistribution)
 			if action == 2 {
-				fmt.Println("error getting action...")
+				log.Println("error getting action...")
 			}
 
 			step.Action = action
 			step.ActionProbability = probability
+            step.LogProbability = math.Log(probability)
 
 			if env.PlayerPosition == target {
 				step.Done = true
@@ -195,15 +224,25 @@ func main() {
 		}
 	}
 
-	//function: log/store the episode data using TransitionData{}
-	EpisodeData.SaveData()
-
 	//function:calculate the advantage and return
 	returnvalues := Returns(EpisodeData.Steps, ppo)
-	advantagevalue := Advantage(EpisodeData.Steps, ppo, returnvalues)
+	advantagevalues := Advantage(EpisodeData.Steps, ppo, returnvalues)
 
-	fmt.Println("returns:", returnvalues)
-	fmt.Println("advantage:", advantagevalue)
+	fmt.Println(len(returnvalues) == len(EpisodeData.Steps))
+	fmt.Println(len(advantagevalues) == len(EpisodeData.Steps))
+
+	for i, step := range EpisodeData.Steps {
+		step.Return = returnvalues[i]
+		fmt.Println(step.Return)
+		step.Advantage = advantagevalues[i]
+		fmt.Println(step.Advantage)
+	}
+
+
+    EpisodeData = EpisodeData.AddReturnsAdvantages(returnvalues, advantagevalues)
+
+	//function: log/store the episode data using TransitionData{}
+	EpisodeData.SaveData()
 	//we have the ppo data inside the latest.txt file.
 	//->function: populate a temp ppo and return it with the adjusted values
 	//->assign current ppo to this function before saving so that the old ppo is backed up before it is adjusted
@@ -224,6 +263,29 @@ func main() {
 
 		//fmt.Printf("Step %d \nx position: %d: %d units to target(50) \nstate value: %f \nAction: %d \nActionProbability: %f\nReward: %d\nDone: %t\n-----------------------------------------------\n", step.StepIndex, step.State, step.DistanceToTarget, step.StateValue, step.Action, step.ActionProbability, step.Reward, step.Done)
 	}
+}
+
+func (td *TransitionData) AddReturnsAdvantages(returns, advantages []float64) (updatedData TransitionData) {
+	for i, step := range td.Steps {
+		tempstep := step
+		newstep := StepData{
+			StateValue: tempstep.StateValue, //result of V(x)
+			State:             tempstep.State,             //current position: x
+			Action:            tempstep.Action,            // left: -1, stay: 0 or right: 1
+			ActionProbability: tempstep.ActionProbability, //result of P(x)
+			NextState:         tempstep.NextState,         // current position + action: x + action (-1, 0, 1)
+			Reward:            tempstep.Reward,            //-1 for each step, +50 for reaching target
+			Done:              tempstep.Done,              //true if x = target
+			StepIndex:        tempstep.StepIndex,        //increments each step
+			DistanceToTarget: tempstep.DistanceToTarget, //target - current position
+			Return:    returns[i],
+			Advantage: advantages[i],
+		}
+
+        updatedData.Steps = append(updatedData.Steps, newstep)
+	}
+
+	return updatedData
 }
 
 func CreateDirectories() {
@@ -252,7 +314,6 @@ func Returns(steps []StepData, ppo PPO) (finalreturns []float64) {
 	gamma := 0.99
 	returnvalue := 0.0
 	returnsum := 0.0
-	i := 0
 	for t := len(steps) - 1; t >= 0; t-- {
 		if t == len(steps)-1 {
 			returnvalue = float64(steps[t].Reward)
@@ -263,7 +324,6 @@ func Returns(steps []StepData, ppo PPO) (finalreturns []float64) {
 			returnsum = returnvalue
 			returns = append(returns, returnsum)
 		}
-		i++
 	}
 
 	for j := len(returns) - 1; j >= 0; j-- {
