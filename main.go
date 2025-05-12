@@ -28,10 +28,10 @@ type StepData struct {
 	State             int     //current position: x
 	Action            int     // left: -1, stay: 0 or right: 1
 	ActionProbability float64 //result of P(x)
-    LogProbability float64
-	NextState         int     // current position + action: x + action (-1, 0, 1)
-	Reward            int     //-1 for each step, +50 for reaching target
-	Done              bool    //true if x = target
+	LogProbability    float64
+	NextState         int  // current position + action: x + action (-1, 0, 1)
+	Reward            int  //-1 for each step, +50 for reaching target
+	Done              bool //true if x = target
 
 	StepIndex        int //increments each step
 	DistanceToTarget int //target - current position
@@ -88,32 +88,37 @@ func main() {
 	//7. save updated network
 	//8. repeat
 
-    //initialize policy 
-    //run episode, collect transition data for ppo
-    //run training 
-    //update policy
-    
+	//initialize policy
+	//run episode, collect transition data for ppo
+	//run training
+	//update policy
 
-    //NEXT STEPS!!!!!!!!!!!!!!!!!!!
-    // training.
-    //run each step of your stored transition data through the policy network
-    //step 1: x=5 -> x=6, action=1(right)
-    //->PolicyNetwork(5) results:
-    //  left   stay  right
-    //->(0.32, 0.32, 0.36)
-    //get the logprobability of the same action for that step
-    //log(0.36)
-    //get the ratio of both log probabilities
-    //->not sure how yet... (division?) if x=4, y=8 then x/y = 4/8 = 1/2, therefore 1:2 ratio
-    //multiply ratio by the advantage
-    //clip the result 
-    //take negative clipped value to get loss
+	//NEXT STEPS!!!!!!!!!!!!!!!!!!!
+	// think about the workflow of the application.
+	// we want to be able to generate an episode, and then train off that episode's transition data.
+	// when we run the application, it should have options:
+	// 1. run episode
+	// 2. run training
+	//
+	//
+	// training.
+	//run each step of your stored transition data through the policy network
+	//step 1: x=5 -> x=6, action=1(right)
+	//->PolicyNetwork(5) results:
+	//  left   stay  right
+	//->(0.32, 0.32, 0.36)
+	//get the logprobability of the same action for that step
+	//log(0.36)
+	//get the ratio of both log probabilities
+	//->not sure how yet... (division?) if x=4, y=8 then x/y = 4/8 = 1/2, therefore 1:2 ratio
+	//multiply ratio by the advantage
+	//clip the result
+	//take negative clipped value to get loss
 
-    //then take the loss for each step, sum them up and get the average.
-    //feed the average into an optimizer that adjusts the weights of the policy network.
-    //fun stuff!
+	//then take the loss for each step, sum them up and get the average.
+	//feed the average into an optimizer that adjusts the weights of the policy network.
+	//fun stuff!
 
-	EpisodeData := TransitionData{}
 	step := StepData{}
 
 	env := Environment{}
@@ -125,7 +130,97 @@ func main() {
 		log.Fatal(err)
 	}
 
-	//START EPISODE with 20 STEPS MAX
+	EpisodeData := TransitionData{}
+
+	//START EPISODE
+	EpisodeData = EpisodeData.RunEpisode(ppo, 50, env, step)
+
+	//function: log/store the episode data using TransitionData{}
+	EpisodeData.SaveData()
+	//we have the ppo data inside the latest.txt file.
+	//->function: populate a temp ppo and return it with the adjusted values
+	//->assign current ppo to this function before saving so that the old ppo is backed up before it is adjusted
+	var losses []float64
+	for _, step := range EpisodeData.Steps {
+		outputs := ppo.Policy.OutputLayer(ppo.Policy.HiddenLayer(step.State))
+		probabilityDistribution := Softmax(outputs)
+		probability := GetNewProbability(probabilityDistribution, step.Action)
+
+		newlogprob := math.Log(probability)
+		ratio := math.Exp(step.LogProbability / newlogprob)
+		clippedratio := ClipValue(ratio)
+		unclippedobjective := ratio * step.Advantage
+		clippedobjective := clippedratio * step.Advantage
+		surrogate_loss := MinimumValue(clippedobjective, unclippedobjective)
+		losses = append(losses, (surrogate_loss * -1))
+	}
+
+	var sumloss float64
+	for _, loss := range losses {
+		sumloss += loss
+	}
+	lossaverage := sumloss / float64(len(EpisodeData.Steps))
+
+	fmt.Println("loss average: ", lossaverage)
+
+	storedPPO, err := ppo.Load()
+	if err != nil {
+		log.Fatal(err)
+	}
+	if !reflect.DeepEqual(ppo, storedPPO) {
+		err = ppo.Save()
+		if err != nil {
+			log.Fatal(err)
+		}
+	}
+
+	for _, step := range EpisodeData.Steps {
+		fmt.Printf("step: %2d, x: %3d -> %3d, %4d units to target, V(%d): %4f action: %2d, action prob: %4f, reward: %2d, done:  %4t\n", step.StepIndex, step.State, step.NextState, step.DistanceToTarget, step.State, step.StateValue, step.Action, step.ActionProbability, step.Reward, step.Done)
+
+		//fmt.Printf("Step %d \nx position: %d: %d units to target(50) \nstate value: %f \nAction: %d \nActionProbability: %f\nReward: %d\nDone: %t\n-----------------------------------------------\n", step.StepIndex, step.State, step.DistanceToTarget, step.StateValue, step.Action, step.ActionProbability, step.Reward, step.Done)
+	}
+}
+
+func MinimumValue(value1, value2 float64) float64 {
+	var minimum float64
+	if value1 < value2 {
+		minimum = value1
+	} else {
+		minimum = value2
+	}
+	return minimum
+}
+
+func ClipValue(value float64) float64 {
+	var clipped float64
+	epsilon := 0.2
+	min := 1 - epsilon
+	max := 1 + epsilon
+
+	if value > max {
+		clipped = max
+	} else if value < min {
+		clipped = min
+	} else {
+		clipped = value
+	}
+	return clipped
+}
+
+func GetNewProbability(probabilityDistribution []float64, savedAction int) (probability float64) {
+
+	switch savedAction {
+	case -1:
+		probability = probabilityDistribution[0]
+	case 0:
+		probability = probabilityDistribution[1]
+	case 2:
+		probability = probabilityDistribution[2]
+	}
+	return probability
+}
+
+func (data *TransitionData) RunEpisode(ppo PPO, numSteps int, env Environment, step StepData) TransitionData {
 	for range maxSteps {
 		if !step.Done {
 
@@ -135,8 +230,7 @@ func main() {
 			step.DistanceToTarget = target - env.PlayerPosition
 
 			//run values network for current state
-			estimatedvalue := ppo.Values.OutputLayer(ppo.Values.HiddenLayer(env.PlayerPosition))
-			step.StateValue = estimatedvalue
+			step.StateValue = ppo.Values.OutputLayer(ppo.Values.HiddenLayer(env.PlayerPosition))
 
 			//run policy network
 
@@ -152,7 +246,7 @@ func main() {
 
 			step.Action = action
 			step.ActionProbability = probability
-            step.LogProbability = math.Log(probability)
+			step.LogProbability = math.Log(probability)
 
 			if env.PlayerPosition == target {
 				step.Done = true
@@ -217,72 +311,44 @@ func main() {
 				}
 			}
 
-			EpisodeData.Steps = append(EpisodeData.Steps, step)
+			data.Steps = append(data.Steps, step)
 			step.StepIndex++
-			//compute advantage and save data or something
-
 		}
 	}
-
 	//function:calculate the advantage and return
-	returnvalues := Returns(EpisodeData.Steps, ppo)
-	advantagevalues := Advantage(EpisodeData.Steps, ppo, returnvalues)
+	returnvalues := Returns(data.Steps, ppo)
+	advantagevalues := Advantage(data.Steps, ppo, returnvalues)
 
-	fmt.Println(len(returnvalues) == len(EpisodeData.Steps))
-	fmt.Println(len(advantagevalues) == len(EpisodeData.Steps))
-
-	for i, step := range EpisodeData.Steps {
+	for i, step := range data.Steps {
 		step.Return = returnvalues[i]
-		fmt.Println(step.Return)
 		step.Advantage = advantagevalues[i]
-		fmt.Println(step.Advantage)
 	}
 
+	*data = data.AddReturnsAdvantages(returnvalues, advantagevalues)
 
-    EpisodeData = EpisodeData.AddReturnsAdvantages(returnvalues, advantagevalues)
+	return *data
 
-	//function: log/store the episode data using TransitionData{}
-	EpisodeData.SaveData()
-	//we have the ppo data inside the latest.txt file.
-	//->function: populate a temp ppo and return it with the adjusted values
-	//->assign current ppo to this function before saving so that the old ppo is backed up before it is adjusted
-
-	storedPPO, err := ppo.Load()
-	if err != nil {
-		log.Fatal(err)
-	}
-	if !reflect.DeepEqual(ppo, storedPPO) {
-		err = ppo.Save()
-		if err != nil {
-			log.Fatal(err)
-		}
-	}
-
-	for _, step := range EpisodeData.Steps {
-		fmt.Printf("step: %2d, x: %2d -> %2d, %4d units to target, V(%d): %4f action: %2d, action prob: %4f, reward: %2d, done:  %4t\n", step.StepIndex, step.State, step.NextState, step.DistanceToTarget, step.State, step.StateValue, step.Action, step.ActionProbability, step.Reward, step.Done)
-
-		//fmt.Printf("Step %d \nx position: %d: %d units to target(50) \nstate value: %f \nAction: %d \nActionProbability: %f\nReward: %d\nDone: %t\n-----------------------------------------------\n", step.StepIndex, step.State, step.DistanceToTarget, step.StateValue, step.Action, step.ActionProbability, step.Reward, step.Done)
-	}
 }
 
 func (td *TransitionData) AddReturnsAdvantages(returns, advantages []float64) (updatedData TransitionData) {
 	for i, step := range td.Steps {
 		tempstep := step
 		newstep := StepData{
-			StateValue: tempstep.StateValue, //result of V(x)
+			StateValue:        tempstep.StateValue,        //result of V(x)
 			State:             tempstep.State,             //current position: x
 			Action:            tempstep.Action,            // left: -1, stay: 0 or right: 1
 			ActionProbability: tempstep.ActionProbability, //result of P(x)
-			NextState:         tempstep.NextState,         // current position + action: x + action (-1, 0, 1)
-			Reward:            tempstep.Reward,            //-1 for each step, +50 for reaching target
-			Done:              tempstep.Done,              //true if x = target
-			StepIndex:        tempstep.StepIndex,        //increments each step
-			DistanceToTarget: tempstep.DistanceToTarget, //target - current position
-			Return:    returns[i],
-			Advantage: advantages[i],
+			LogProbability:    tempstep.LogProbability,
+			NextState:         tempstep.NextState,        // current position + action: x + action (-1, 0, 1)
+			Reward:            tempstep.Reward,           //-1 for each step, +50 for reaching target
+			Done:              tempstep.Done,             //true if x = target
+			StepIndex:         tempstep.StepIndex,        //increments each step
+			DistanceToTarget:  tempstep.DistanceToTarget, //target - current position
+			Return:            returns[i],
+			Advantage:         advantages[i],
 		}
 
-        updatedData.Steps = append(updatedData.Steps, newstep)
+		updatedData.Steps = append(updatedData.Steps, newstep)
 	}
 
 	return updatedData
