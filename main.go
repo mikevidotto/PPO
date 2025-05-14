@@ -71,75 +71,27 @@ type Neuron struct {
 }
 
 func main() {
+    //TODO
+    //
+    //flags:
+    //->e: run an episode with the latest policy, backup the old episode data, and store the latest episode data
+    //->t: run a training session for the current network, backup the old policy data, and store the latest version of the policy
+
 	CreateDirectories()
-	//training cycle:
-	//1. initialize episode
-	//  ->load the network's neurons
-	//  ->use advantage to alter weights.
-	//  ->reset environment
-	//2. get action from policy network
-	//3. apply action to environment
-	//4. calculate reward
-	//5. run values network
-	//6. calculate return and advantage
-	//  ->return: At = reward + discountvalue(0.99) * ((reward2 + discountvalue(0.99)) * reward3 + discountvalue(0.99)...
-	//  ->advantage = return(At) - estimated value of state at t( V(t) )
-	//6. get log value of... something. I think the policy network results?
-	//7. save updated network
-	//8. repeat
 
-	//initialize policy
-	//run episode, collect transition data for ppo
-	//run training
-	//update policy
-
-	//NEXT STEPS!!!!!!!!!!!!!!!!!!!
-	// think about the workflow of the application.
-	// we want to be able to generate an episode, and then train off that episode's transition data.
-	// when we run the application, it should have options:
-	// 1. run episode
-	// 2. run training
-	//
-	//
-	// training.
-	//run each step of your stored transition data through the policy network
-	//step 1: x=5 -> x=6, action=1(right)
-	//->PolicyNetwork(5) results:
-	//  left   stay  right
-	//->(0.32, 0.32, 0.36)
-	//get the logprobability of the same action for that step
-	//log(0.36)
-	//get the ratio of both log probabilities
-	//->not sure how yet... (division?) if x=4, y=8 then x/y = 4/8 = 1/2, therefore 1:2 ratio
-	//multiply ratio by the advantage
-	//clip the result
-	//take negative clipped value to get loss
-
-	//then take the loss for each step, sum them up and get the average.
-	//feed the average into an optimizer that adjusts the weights of the policy network.
-	//fun stuff!
-
-	step := StepData{}
-
-	env := Environment{}
-	env.Reset()
-
-	ppo := PPO{}
-	ppo, err := ppo.Load()
+	ppo, err := LoadPPO()
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	EpisodeData := TransitionData{}
-
 	//START EPISODE
-	EpisodeData = EpisodeData.RunEpisode(ppo, 50, env, step)
+    EpisodeData := RunEpisode(ppo, maxSteps)
 
 	//function: log/store the episode data using TransitionData{}
 	EpisodeData.SaveData()
 	//we have the ppo data inside the latest.txt file.
 	//->function: populate a temp ppo and return it with the adjusted values
-	//->assign current ppo to this function before saving so that the old ppo is backed up before it is adjusted
+	//->assign current ppo to this function before saving to back up old ppo before it is adjusted
 	var losses []float64
 	for _, step := range EpisodeData.Steps {
 		outputs := ppo.Policy.OutputLayer(ppo.Policy.HiddenLayer(step.State))
@@ -163,7 +115,7 @@ func main() {
 
 	fmt.Println("loss average: ", lossaverage)
 
-	storedPPO, err := ppo.Load()
+	storedPPO, err := LoadPPO()
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -220,7 +172,10 @@ func GetNewProbability(probabilityDistribution []float64, savedAction int) (prob
 	return probability
 }
 
-func (data *TransitionData) RunEpisode(ppo PPO, numSteps int, env Environment, step StepData) TransitionData {
+func RunEpisode(ppo PPO, numSteps int) (data TransitionData) {
+	step := StepData{}
+	env := Environment{}
+	env.Reset()
 	for range maxSteps {
 		if !step.Done {
 
@@ -324,9 +279,9 @@ func (data *TransitionData) RunEpisode(ppo PPO, numSteps int, env Environment, s
 		step.Advantage = advantagevalues[i]
 	}
 
-	*data = data.AddReturnsAdvantages(returnvalues, advantagevalues)
+	data = data.AddReturnsAdvantages(returnvalues, advantagevalues)
 
-	return *data
+	return data
 
 }
 
@@ -464,7 +419,7 @@ func (p *PPO) Save() error {
 	return nil
 }
 
-func (p *PPO) Load() (PPO, error) {
+func LoadPPO() (PPO, error) {
 	var savedPPO PPO
 	if !ff.FileExists("./init/ppo/latest.txt") {
 		savedPPO.Policy.InitializeHiddenNeurons(3)
