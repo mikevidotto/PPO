@@ -17,6 +17,7 @@ const (
 	maxPosition  = 100
 	minPosition  = 0
 	target       = 50
+	gamma        = 0.99
 	learningrate = 0.01
 )
 
@@ -26,25 +27,23 @@ type TransitionData struct {
 }
 
 type StepData struct {
-	StateValue float64 //result of V(x)
+	StateValue float64
 
-	State                   int     //current position: x
-	Action                  int     // left: -1, stay: 0 or right: 1
-	ActionProbability       float64 //result of P(x)
+	State                   int
+	Action                  int
+	ActionProbability       float64
 	ProbabilityDistribution []float64
 	YVector                 []float64
 	LogProbability          float64
 	HiddenValues            []float64
 	OutputLogits            []float64
-	NextState               int  // current position + action: x + action (-1, 0, 1)
-	Reward                  int  //-1 for each step, +50 for reaching target
-	Done                    bool //true if x = target
-
-	StepIndex        int //increments each step
-	DistanceToTarget int //target - current position
-
-	Return    float64
-	Advantage float64
+	NextState               int
+	Reward                  int
+	Done                    bool
+	StepIndex               int
+	DistanceToTarget        int
+	Return                  float64
+	Advantage               float64
 }
 
 type Environment struct {
@@ -78,12 +77,6 @@ type Neuron struct {
 }
 
 func main() {
-	//TODO
-	//
-	//flags:
-	//->e: run an episode with the latest policy, backup the old episode data, and store the latest episode data
-	//->t: run a training session for the current network, backup the old policy data, and store the latest version of the policy
-
 	run := flag.Bool("r", false, "run an episode of the current policy")
 	train := flag.Int("t", 0, "train the current policy")
 	flag.Parse()
@@ -91,45 +84,8 @@ func main() {
 	CreateDirectories()
 
 	if *run {
-		//run episode without saving any data.
-		fmt.Println("run episode")
-		ppo, err := LoadPPO()
-		if err != nil {
-			log.Fatal(err)
-		}
-
-		//START EPISODE
-		EpisodeData := RunEpisode(ppo, maxSteps)
-
-		for _, step := range EpisodeData.Steps {
-			fmt.Printf("step: %2d, x: %3d -> %3d, %4d units to target, V(%d): %4f action: %2d, action prob: %4f, reward: %2d, done:  %4t\n", step.StepIndex, step.State, step.NextState, step.DistanceToTarget, step.State, step.StateValue, step.Action, step.ActionProbability, step.Reward, step.Done)
-
-			//fmt.Printf("Step %d \nx position: %d: %d units to target(50) \nstate value: %f \nAction: %d \nActionProbability: %f\nReward: %d\nDone: %t\n-----------------------------------------------\n", step.StepIndex, step.State, step.DistanceToTarget, step.StateValue, step.Action, step.ActionProbability, step.Reward, step.Done)
-		}
-
-		var losses []float64
-		for _, step := range EpisodeData.Steps {
-			outputs := ppo.Policy.OutputLayer(ppo.Policy.HiddenLayer(step.State))
-			probabilityDistribution := Softmax(outputs)
-			probability := GetNewProbability(probabilityDistribution, step.Action)
-
-			newlogprob := math.Log(probability)
-			ratio := math.Exp(step.LogProbability / newlogprob)
-			clippedratio := ClipValue(ratio)
-			unclippedobjective := ratio * step.Advantage
-			clippedobjective := clippedratio * step.Advantage
-			surrogate_loss := min(clippedobjective, unclippedobjective)
-			losses = append(losses, (surrogate_loss * -1))
-		}
-
-		var sumloss float64
-		for _, loss := range losses {
-			sumloss += loss
-		}
-		lossaverage := sumloss / float64(len(EpisodeData.Steps))
-
-		fmt.Println("Total reward for episode: ", EpisodeData.RewardSum)
-		fmt.Println("loss average: ", lossaverage)
+		fmt.Println("running the current policy")
+		_ = RunEpisode()
 
 	} else if *train > 0 {
 		fmt.Printf("training current policy with %d epochs.\n", *train)
@@ -137,15 +93,10 @@ func main() {
 		for i := range *train {
 			ppo, err := LoadPPO()
 			if err != nil {
-				log.Fatal(err)
+				log.Fatal("error loading policy:", err)
 			}
-			EpisodeData := RunEpisode(ppo, maxSteps)
 
-			//for _, step := range EpisodeData.Steps {
-			//	fmt.Printf("step: %2d, x: %3d -> %3d, %4d units to target, V(%d): %4f action: %2d, action prob: %4f, reward: %2d, done:  %4t\n", step.StepIndex, step.State, step.NextState, step.DistanceToTarget, step.State, step.StateValue, step.Action, step.ActionProbability, step.Reward, step.Done)
-
-			//	//fmt.Printf("Step %d \nx position: %d: %d units to target(50) \nstate value: %f \nAction: %d \nActionProbability: %f\nReward: %d\nDone: %t\n-----------------------------------------------\n", step.StepIndex, step.State, step.DistanceToTarget, step.StateValue, step.Action, step.ActionProbability, step.Reward, step.Done)
-			//}
+			EpisodeData := RunEpisode()
 
 			rewardsums = append(rewardsums, EpisodeData.RewardSum)
 
@@ -160,59 +111,25 @@ func main() {
 				}
 			}
 
-			//EpisodeData, err = LoadData()
-			//if err != nil {
-			//	log.Fatal("error loading episode data:", err)
-			//}
-
-			//we have the ppo data inside the latest.txt file.
-			//->function: populate a temp ppo and return it with the adjusted values
-			//->assign current ppo to this function before saving to back up old ppo before it is adjusted
-			var losses []float64
-			for _, step := range EpisodeData.Steps {
-				outputs := ppo.Policy.OutputLayer(ppo.Policy.HiddenLayer(step.State))
-				probabilityDistribution := Softmax(outputs)
-				probability := GetNewProbability(probabilityDistribution, step.Action)
-
-				newlogprob := math.Log(probability)
-				ratio := math.Exp(step.LogProbability / newlogprob)
-				clippedratio := ClipValue(ratio)
-				unclippedobjective := ratio * step.Advantage
-				clippedobjective := clippedratio * step.Advantage
-				surrogate_loss := min(clippedobjective, unclippedobjective)
-				losses = append(losses, (surrogate_loss * -1))
-			}
-
-			var sumloss float64
-			for _, loss := range losses {
-				sumloss += loss
-			}
-
-			//function: log/store the episode data using TransitionData{}
 			if (i % 100) == 0 {
-				fmt.Println("saving rewardsums: ", rewardsums)
-                sum := 0
-                for _, value := range rewardsums {
-                    sum += value
-                }
-                average := float64(sum / len(rewardsums))
+				fmt.Println("rewardsums: ", rewardsums)
+				sum := 0
+				for _, value := range rewardsums {
+					sum += value
+				}
+				average := float64(sum / len(rewardsums))
 				err = LogRewardAverage(average)
 				if err != nil {
 					log.Fatal(err)
 				}
-                rewardsums = []int{}
-				//EpisodeData.SaveData()
-				lossaverage := sumloss / float64(len(EpisodeData.Steps))
-
-				fmt.Println("loss average: ", lossaverage)
+				rewardsums = []int{}
+				fmt.Println("loss average2:", GetAverageLoss(EpisodeData, ppo))
 			}
 
 			ogradients := GetOutputGradients(EpisodeData, ppo)
 			hgradients := GetHiddenGradients(EpisodeData, ppo)
 
 			updatedPPO := BackProp(hgradients, ogradients, EpisodeData.Steps, ppo)
-
-			//fmt.Println("new ppo: ", updatedPPO)
 
 			storedPPO, err = LoadPPO()
 			if err != nil {
@@ -226,33 +143,16 @@ func main() {
 			}
 		}
 
-		//for _, step := range EpisodeData.Steps {
-		//	fmt.Printf("step: %2d, x: %3d -> %3d, %4d units to target, V(%d): %4f action: %2d, action prob: %4f, reward: %2d, done:  %4t\n", step.StepIndex, step.State, step.NextState, step.DistanceToTarget, step.State, step.StateValue, step.Action, step.ActionProbability, step.Reward, step.Done)
-
-		//	//fmt.Printf("Step %d \nx position: %d: %d units to target(50) \nstate value: %f \nAction: %d \nActionProbability: %f\nReward: %d\nDone: %t\n-----------------------------------------------\n", step.StepIndex, step.State, step.DistanceToTarget, step.StateValue, step.Action, step.ActionProbability, step.Reward, step.Done)
-		//}
-
 	}
 }
 
 func GetOutputGradients(data TransitionData, ppo PPO) []float64 {
 	var gradients [][]float64
-	//for each step we want:
-	//->the loss w.r.t. each weight in the output layer. There are 3 output neurons with 3 weights each, for a total of 9 weights
-	//
-	//So the steps would be:
-	//1. iterate over the steps
-	//2. iterate over each neuron to get the value of each hidden layer output that goes into calculating the loss w.r.t. each weight
-	//3. add each value for that step into an array.
-	//4. append each step's array to an array.
-	//RESULT: An array of length:50 for each step, that contains an array of nine values for each weight.
-	//5. take each element of each array and add
 
 	for _, step := range data.Steps {
 		var stepvalues []float64
 		for j := range ppo.Policy.OutputNeurons {
 			for k := range ppo.Policy.HiddenNeurons {
-				//fmt.Printf("step.HiddenValues[%d]: %.3f\n", k, step.HiddenValues[k])
 				losswrtweight := (step.ProbabilityDistribution[j] - step.YVector[j]) * step.HiddenValues[k]
 				stepvalues = append(stepvalues, losswrtweight)
 			}
@@ -261,19 +161,15 @@ func GetOutputGradients(data TransitionData, ppo PPO) []float64 {
 	}
 
 	var sums [9]float64
-	//sum up all values
 	for _, step := range gradients {
 		for j, value := range step {
 			sums[j] += value
-			//   fmt.Printf("sums: %.3f\n", sums[j])
 		}
-		//fmt.Printf("%d: %.3f\n", i, step)
 	}
 
 	var averages []float64
 	for _, sum := range sums {
 		averages = append(averages, sum/maxSteps)
-		//fmt.Printf("averages: %.3f\n", averages)
 	}
 
 	return averages
@@ -298,7 +194,6 @@ func GetHiddenGradients(data TransitionData, ppo PPO) []float64 {
 
 	var sums [3]float64
 	for _, step := range gradients {
-		//fmt.Println("len(step):", len(step))
 		for j, value := range step {
 			sums[j] += value
 		}
@@ -316,17 +211,13 @@ func BackProp(haverages, oaverages []float64, steps []StepData, ppo PPO) (update
 	for i, neurons := range ppo.Policy.HiddenNeurons {
 		for j, weight := range neurons.Weights {
 			newweight := weight - (haverages[j] * learningrate)
-			//fmt.Println("current hidden weight: ", weight)
 			updatedPPO.Policy.HiddenNeurons[i].Weights[j] = newweight
-			//fmt.Println("new hidden weight: ", updatedPPO.Policy.HiddenNeurons[i].Weights[j])
 		}
 	}
 	for i, neurons := range ppo.Policy.OutputNeurons {
 		for j, weight := range neurons.Weights {
 			newweight := weight - (oaverages[j] * learningrate)
-			//fmt.Println("current output weight: ", weight)
 			updatedPPO.Policy.OutputNeurons[i].Weights[j] = newweight
-			//fmt.Println("new output weight: ", updatedPPO.Policy.OutputNeurons[i].Weights[j])
 		}
 	}
 	return updatedPPO
@@ -349,7 +240,6 @@ func ClipValue(value float64) float64 {
 }
 
 func GetNewProbability(probabilityDistribution []float64, savedAction int) (probability float64) {
-
 	switch savedAction {
 	case -1:
 		probability = probabilityDistribution[0]
@@ -361,7 +251,11 @@ func GetNewProbability(probabilityDistribution []float64, savedAction int) (prob
 	return probability
 }
 
-func RunEpisode(ppo PPO, numSteps int) (data TransitionData) {
+func RunEpisode() (data TransitionData) {
+	ppo, err := LoadPPO()
+	if err != nil {
+		log.Fatal(err)
+	}
 	step := StepData{}
 	env := Environment{}
 	env.Reset()
@@ -371,38 +265,14 @@ func RunEpisode(ppo PPO, numSteps int) (data TransitionData) {
 
 			step.State = env.PlayerPosition
 			step.DistanceToTarget = target - env.PlayerPosition
+		    step.Reward = -1
 
-			if step.DistanceToTarget < 5 {
-				step.Reward = 16
-			} else if step.DistanceToTarget < 10 {
-				step.Reward = 8
-			} else if step.DistanceToTarget < 15 {
-				step.Reward = 4
-			} else if step.DistanceToTarget < 20 {
-				step.Reward = 2
-			} else if step.DistanceToTarget < 30 {
-				step.Reward = 1
-			} else if step.DistanceToTarget < 40 {
-				step.Reward = 0 //automatically -1 reward for each step taken
-			} else {
-				step.Reward = -1
-			}
-
-			//run values network for current state
 			step.StateValue = ppo.Values.OutputLayer(ppo.Values.HiddenLayer(env.PlayerPosition))
-
-			//run policy network
-
-			//fmt.Printf("env.PlayerPosition: %d\n", env.PlayerPosition)
 			step.HiddenValues = ppo.Policy.HiddenLayer(env.PlayerPosition)
-			//for _, value := range step.HiddenValues {
-			//	fmt.Printf("HiddenValues: %.3f", value)
-			//}
 			step.OutputLogits = ppo.Policy.OutputLayer(step.HiddenValues)
-
 			step.ProbabilityDistribution = Softmax(step.OutputLogits)
-
 			action, probability := StochasticSample(step.ProbabilityDistribution)
+
 			if action == 2 {
 				log.Println("error getting action...")
 			}
@@ -426,7 +296,6 @@ func RunEpisode(ppo PPO, numSteps int) (data TransitionData) {
 				step.Done = true
 			}
 
-			//apply action from probabilityDistribution
 			if env.PlayerPosition+action > 100 {
 				env.PlayerPosition = 100
 			} else if env.PlayerPosition+action < 0 {
@@ -440,8 +309,6 @@ func RunEpisode(ppo PPO, numSteps int) (data TransitionData) {
 				step.Reward += 50
 				step.Done = true
 			} else {
-
-				//compute reward. should be -2 if we are further from the target and 1 if we are closer to then check if we are on the target and reward 50 points if we are.
 				margin := (env.TargetPosition - env.PlayerPosition)
 				if margin < 0 {
 					if step.DistanceToTarget < 0 {
@@ -452,7 +319,6 @@ func RunEpisode(ppo PPO, numSteps int) (data TransitionData) {
 						} else {
 							step.Reward += 2
 						}
-
 					} else {
 						if (margin * -1) == step.DistanceToTarget {
 							step.Reward += 0
@@ -471,7 +337,6 @@ func RunEpisode(ppo PPO, numSteps int) (data TransitionData) {
 						} else {
 							step.Reward += 2
 						}
-
 					} else {
 						if margin == step.DistanceToTarget {
 							step.Reward += 0
@@ -480,77 +345,86 @@ func RunEpisode(ppo PPO, numSteps int) (data TransitionData) {
 						} else {
 							step.Reward += 2
 						}
-
 					}
 				}
 			}
-
 			rewardsum += step.Reward
 			data.RewardSum += step.Reward
 			data.Steps = append(data.Steps, step)
 			step.StepIndex++
 		}
 	}
-	//function:calculate the advantage and return
-	returnvalues := Returns(data.Steps, ppo)
-	advantagevalues := Advantage(data.Steps, ppo, returnvalues)
 
-	for i, step := range data.Steps {
-		step.Return = returnvalues[i]
-		step.Advantage = advantagevalues[i]
-	}
+	returnvalues := GetReturns(data.Steps, ppo)
+	advantagevalues := GetAdvantage(data.Steps, ppo, returnvalues)
 
 	data = data.AddReturnsAdvantages(returnvalues, advantagevalues)
 
-	return data
+    //----------------------------------------------------------//
+    //DATA OUTPUT:
+	//for _, step := range data.Steps {
+	//    //shortened output with returns and advantages
+	//	//fmt.Printf("step: %2d, x: %3d -> %3d, new return: %10f, advantage: %10f\n", step.StepIndex, step.State, step.NextState, step.Return, step.Advantage)
 
+	//    //long form output
+	//	fmt.Printf("step: %2d, x: %3d -> %3d, %4d units to target, V(%d): %4f action: %2d, action prob: %4f, reward: %2d, done:  %4t\n", step.StepIndex, step.State, step.NextState, step.DistanceToTarget, step.State, step.StateValue, step.Action, step.ActionProbability, step.Reward, step.Done)
+	//}
+
+	//fmt.Println("Total reward for episode: ", data.RewardSum)
+	//fmt.Println("loss average: ", GetAverageLoss(data, ppo))
+	//fmt.Println("absolute distance: ", math.Abs(float64(step.DistanceToTarget)))
+	//fmt.Println("reward value: ", step.Reward)
+    //----------------------------------------------------------//
+
+	return data
 }
 
-//type StepData struct {
-//	StateValue float64 //result of V(x)
-//
-//	State                   int     //current position: x
-//	Action                  int     // left: -1, stay: 0 or right: 1
-//	ActionProbability       float64 //result of P(x)
-//	ProbabilityDistribution []float64
-//	YVector                 []float64
-//	LogProbability          float64
-//	HiddenValues            []float64
-//	OutputLogits            []float64
-//	NextState               int  // current position + action: x + action (-1, 0, 1)
-//	Reward                  int  //-1 for each step, +50 for reaching target
-//	Done                    bool //true if x = target
-//
-//	StepIndex        int //increments each step
-//	DistanceToTarget int //target - current position
-//
-//	Return    float64
-//	Advantage float64
-//}
+func GetAverageLoss(data TransitionData, ppo PPO) float64 {
+	var losses []float64
+	for _, step := range data.Steps {
+		outputs := ppo.Policy.OutputLayer(ppo.Policy.HiddenLayer(step.State))
+		probabilityDistribution := Softmax(outputs)
+		probability := GetNewProbability(probabilityDistribution, step.Action)
+
+		newlogprob := math.Log(probability)
+		ratio := math.Exp(step.LogProbability / newlogprob)
+		clippedratio := ClipValue(ratio)
+		unclippedobjective := ratio * step.Advantage
+		clippedobjective := clippedratio * step.Advantage
+		surrogate_loss := min(clippedobjective, unclippedobjective)
+		losses = append(losses, (surrogate_loss * -1))
+	}
+
+	var sumloss float64
+	for _, loss := range losses {
+		sumloss += loss
+	}
+
+	lossaverage := sumloss / float64(len(data.Steps))
+	return lossaverage
+}
 
 func (td *TransitionData) AddReturnsAdvantages(returns, advantages []float64) (updatedData TransitionData) {
 	for i, step := range td.Steps {
 		tempstep := step
 		newstep := StepData{
-			StateValue: tempstep.StateValue, //result of V(x)
+			StateValue: tempstep.StateValue,
 
-			State:                   tempstep.State,             //current position: x
-			Action:                  tempstep.Action,            // left: -1, stay: 0 or right: 1
-			ActionProbability:       tempstep.ActionProbability, //result of P(x)
+			State:                   tempstep.State,
+			Action:                  tempstep.Action,
+			ActionProbability:       tempstep.ActionProbability,
 			ProbabilityDistribution: tempstep.ProbabilityDistribution,
 			YVector:                 tempstep.YVector,
 			LogProbability:          tempstep.LogProbability,
 			HiddenValues:            tempstep.HiddenValues,
 			OutputLogits:            tempstep.OutputLogits,
-			NextState:               tempstep.NextState, // current position + action: x + action (-1, 0, 1)
-			Reward:                  tempstep.Reward,    //-1 for each step, +50 for reaching target
-			Done:                    tempstep.Done,      //true if x = target
-
-			StepIndex:        tempstep.StepIndex,        //increments each step
-			DistanceToTarget: tempstep.DistanceToTarget, //target - current position
-
-			Return:    returns[i],
-			Advantage: advantages[i],
+			NextState:               tempstep.NextState,
+			Reward:                  tempstep.Reward,
+			Done:                    tempstep.Done,
+			StepIndex:               tempstep.StepIndex,
+			DistanceToTarget:        tempstep.DistanceToTarget,
+			Return:                  returns[i],
+			Advantage:               advantages[i],
 		}
 
 		updatedData.Steps = append(updatedData.Steps, newstep)
@@ -580,14 +454,31 @@ func CreateDirIfNotExist(dir string) {
 			log.Fatal(err)
 		}
 	}
-
 }
 
-func Returns(steps []StepData, ppo PPO) (finalreturns []float64) {
+func Return(data TransitionData, index int, reward int) float64 {
+	returnvalue := 0.0
+	returnsum := 0.0
+
+	for t := len(data.Steps) - 1; t >= 0; t-- {
+		if t == len(data.Steps)-1 {
+			returnvalue = float64(data.Steps[t].Reward)
+			returnsum = returnvalue
+		} else {
+			returnvalue = float64(data.Steps[t].Reward) + (gamma * returnsum)
+			returnsum = returnvalue
+		}
+	}
+
+	return returnsum
+}
+
+func GetReturns(steps []StepData, ppo PPO) (finalreturns []float64) {
 	var returns []float64
 	gamma := 0.99
 	returnvalue := 0.0
 	returnsum := 0.0
+
 	for t := len(steps) - 1; t >= 0; t-- {
 		if t == len(steps)-1 {
 			returnvalue = float64(steps[t].Reward)
@@ -607,8 +498,9 @@ func Returns(steps []StepData, ppo PPO) (finalreturns []float64) {
 	return finalreturns
 }
 
-func Advantage(steps []StepData, ppo PPO, returns []float64) (advantages []float64) {
+func GetAdvantage(steps []StepData, ppo PPO, returns []float64) (advantages []float64) {
 	var advantage float64
+
 	for i, step := range steps {
 		advantage = returns[i] - step.StateValue
 		advantages = append(advantages, advantage)
@@ -672,21 +564,7 @@ func (p *PPO) Save() error {
 	if err != nil {
 		return err
 	}
-	//create backup of current network data
-	//if ff.FileExists("./init/ppo/latest.txt") {
-	//	data, err := os.ReadFile("./init/ppo/latest.txt")
-	//	if err != nil {
-	//		return err
-	//	}
-	//	file, err := os.CreateTemp("./history/ppo/", "*.txt")
-	//	if err != nil {
-	//		return err
-	//	}
-	//	_, err = file.Write(data)
-	//	if err != nil {
-	//		return err
-	//	}
-	//}
+
 	err = os.WriteFile("./init/ppo/latest.txt", bytes, 0666)
 	if err != nil {
 		return err
@@ -817,7 +695,6 @@ func (v *ValuesNetwork) OutputLayer(hiddenVector []float64) float64 {
 func (p *PolicyNetwork) HiddenLayer(input int) (vector []float64) {
 	for _, neuron := range p.HiddenNeurons {
 		logit := (float64(input) * neuron.Weights[0]) + neuron.Bias
-		//fmt.Printf("(float64(input): %.3f\nneuron.Weights[0]: %.3f\nneuron.Bias: %.3f\nLOGIT: %.3f\ntanH(%.3f): %.3f\n", float64(input), neuron.Weights[0], neuron.Bias, logit, logit, math.Tanh(logit))
 		vector = append(vector, TanH(logit))
 	}
 	return vector
