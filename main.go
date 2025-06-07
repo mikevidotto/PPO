@@ -98,7 +98,7 @@ func main() {
 
 			rewardsums = append(rewardsums, EpisodeData.RewardSum)
 
-            SaveIfChanged(ppo)
+			SaveIfChanged(ppo)
 
 			if (i % 100) == 0 {
 				fmt.Println("rewardsums: ", rewardsums)
@@ -115,21 +115,27 @@ func main() {
 				fmt.Println("loss average2:", GetAverageLoss(EpisodeData, ppo))
 			}
 
-			ogradients := GetOutputGradients(EpisodeData, ppo)
-			hgradients := GetHiddenGradients(EpisodeData, ppo)
+			phidden, poutput := GetPolicyGradients(EpisodeData, ppo)
+			vhidden, voutput := GetValuesGradients(EpisodeData, ppo)
 
-			updatedPPO := BackProp(hgradients, ogradients, EpisodeData.Steps, ppo)
+			updatedPPO := BackPropagation(phidden, poutput, vhidden, voutput, EpisodeData.Steps, ppo)
 
-            SaveIfChanged(updatedPPO)
+			SaveIfChanged(updatedPPO)
 		}
 
 	}
 }
 
+func GetPolicyGradients(EpisodeData TransitionData, ppo PPO) (hidden, output []float64) {
+	hidden = GetHiddenGradients(EpisodeData, ppo)
+	output = GetOutputGradients(EpisodeData, ppo)
+	return hidden, output
+}
+
 func SaveIfChanged(ppo PPO) error {
 	storedPPO, err := LoadPPO()
 	if err != nil {
-	    return err	
+		return err
 	}
 	if !reflect.DeepEqual(ppo, storedPPO) {
 		err = ppo.Save()
@@ -137,11 +143,12 @@ func SaveIfChanged(ppo PPO) error {
 			return err
 		}
 	}
-    return nil
+	return nil
 }
 
-func GetValuesGradients(data TransitionData, ppo PPO) []float64 {
-	return []float64{0.0, 0.0}
+func GetValuesGradients(data TransitionData, ppo PPO) (hidden, output []float64) {
+    
+	return hidden, output
 }
 
 func GetOutputGradients(data TransitionData, ppo PPO) []float64 {
@@ -169,6 +176,8 @@ func GetOutputGradients(data TransitionData, ppo PPO) []float64 {
 	for _, sum := range sums {
 		averages = append(averages, sum/maxSteps)
 	}
+
+	fmt.Println("WHAT THE HELLINGTON:", averages)
 
 	return averages
 }
@@ -204,19 +213,29 @@ func GetHiddenGradients(data TransitionData, ppo PPO) []float64 {
 	return averages
 }
 
-func BackProp(haverages, oaverages []float64, steps []StepData, ppo PPO) (updatedPPO PPO) {
+func BackPropagation(policyhiddenaverages, policyoutputaverages []float64, valueshiddenaverages, valuesoutputaverages []float64, steps []StepData, ppo PPO) (updatedPPO PPO) {
 	updatedPPO = ppo
 	for i, neurons := range ppo.Policy.HiddenNeurons {
 		for j, weight := range neurons.Weights {
-			newweight := weight - (haverages[j] * learningrate)
+			newweight := weight - (policyhiddenaverages[j] * learningrate)
 			updatedPPO.Policy.HiddenNeurons[i].Weights[j] = newweight
 		}
 	}
 	for i, neurons := range ppo.Policy.OutputNeurons {
 		for j, weight := range neurons.Weights {
-			newweight := weight - (oaverages[j] * learningrate)
+			newweight := weight - (policyoutputaverages[j] * learningrate)
 			updatedPPO.Policy.OutputNeurons[i].Weights[j] = newweight
 		}
+	}
+	for i, neurons := range ppo.Values.HiddenNeurons {
+		for j, weight := range neurons.Weights {
+			newweight := weight - (policyhiddenaverages[j] * learningrate)
+			updatedPPO.Values.HiddenNeurons[i].Weights[j] = newweight
+		}
+	}
+	for j, weight := range ppo.Values.OutputNeuron.Weights {
+		newweight := weight - (policyoutputaverages[j] * learningrate)
+		updatedPPO.Values.OutputNeuron.Weights[j] = newweight
 	}
 	return updatedPPO
 }
@@ -688,7 +707,7 @@ func (v *ValuesNetwork) OutputLayer(hiddenVector []float64) float64 {
 func (p *PolicyNetwork) HiddenLayer(input int) (vector []float64) {
 	for _, neuron := range p.HiddenNeurons {
 		logit := (float64(input) * neuron.Weights[0]) + neuron.Bias
-		vector = append(vector, TanH(logit))
+		vector = append(vector, math.Tanh(logit))
 	}
 	return vector
 }
@@ -699,11 +718,7 @@ func (p *PolicyNetwork) OutputLayer(hiddenVector []float64) (outputs []float64) 
 		for i, value := range hiddenVector {
 			summedWeights += (value * neuron.Weights[i])
 		}
-		outputs = append(outputs, TanH(summedWeights+neuron.Bias))
+		outputs = append(outputs, math.Tanh(summedWeights+neuron.Bias))
 	}
 	return outputs
-}
-
-func TanH(logit float64) float64 {
-	return math.Sinh(logit) / math.Cosh(logit)
 }
