@@ -89,19 +89,29 @@ func main() {
 
 	if *run {
 		fmt.Println("running the current policy")
-		_ = RunEpisode(ppo)
+		_ = RunEpisode(ppo, *run)
 	} else if *train > 0 {
 		fmt.Printf("training current policy with %d epochs.\n", *train)
 		var rewardsums []int
+		wincount := 0
+        loops := *train
+        
 		for i := range *train {
-			EpisodeData := RunEpisode(ppo)
+			EpisodeData := RunEpisode(ppo, *run)
 
 			rewardsums = append(rewardsums, EpisodeData.RewardSum)
 
 			SaveIfChanged(ppo)
 
+			if EpisodeData.Steps[len(EpisodeData.Steps)-1].State == 50 {
+				fmt.Printf("%d -> %d: ", EpisodeData.Steps[0].State, EpisodeData.Steps[len(EpisodeData.Steps)-1].State)
+				fmt.Printf("Winner!\n")
+				wincount++
+			} else {
+			}
+
 			if (i % 100) == 0 {
-				fmt.Println("rewardsums: ", rewardsums)
+				//fmt.Println("rewardsums: ", rewardsums)
 				sum := 0
 				for _, value := range rewardsums {
 					sum += value
@@ -112,7 +122,7 @@ func main() {
 					log.Fatal(err)
 				}
 				rewardsums = []int{}
-				fmt.Println("loss average2:", GetAverageLoss(EpisodeData, ppo))
+				//fmt.Println("loss average2:", GetAverageLoss(EpisodeData, ppo))
 			}
 
 			phidden, poutput := GetPolicyGradients(EpisodeData, ppo)
@@ -122,6 +132,7 @@ func main() {
 
 			SaveIfChanged(updatedPPO)
 		}
+        fmt.Printf("In %d epochs, the agent won %d times. Win percentage: %f", *train, wincount, float64(float64(wincount)/ float64(loops)))
 
 	}
 }
@@ -177,7 +188,7 @@ func GetOutputGradients(data TransitionData, ppo PPO) []float64 {
 		averages = append(averages, sum/maxSteps)
 	}
 
-	fmt.Println("WHAT THE HELLINGTON:", averages)
+	//fmt.Println("WHAT THE HELLINGTON:", averages)
 
 	return averages
 }
@@ -268,7 +279,7 @@ func GetNewProbability(probabilityDistribution []float64, savedAction int) (prob
 	return probability
 }
 
-func RunEpisode(ppo PPO) (data TransitionData) {
+func RunEpisode(ppo PPO, run bool) (data TransitionData) {
 	step := StepData{}
 	env := Environment{}
 	env.Reset()
@@ -372,6 +383,16 @@ func RunEpisode(ppo PPO) (data TransitionData) {
 	advantagevalues := GetAdvantage(data.Steps, ppo, returnvalues)
 
 	data = data.AddReturnsAdvantages(returnvalues, advantagevalues)
+
+	if run {
+		for _, step := range data.Steps {
+			//shortened output with returns and advantages
+			//fmt.Printf("step: %2d, x: %3d -> %3d, new return: %10f, advantage: %10f\n", step.StepIndex, step.State, step.NextState, step.Return, step.Advantage)
+
+			//long form output
+			fmt.Printf("step: %2d, x: %3d -> %3d, %4d units to target, V(%d): %4f action: %2d, action prob: %4f, reward: %2d, done:  %4t\n", step.StepIndex, step.State, step.NextState, step.DistanceToTarget, step.State, step.StateValue, step.Action, step.ActionProbability, step.Reward, step.Done)
+		}
+	}
 
 	//----------------------------------------------------------//
 	//DATA OUTPUT:
