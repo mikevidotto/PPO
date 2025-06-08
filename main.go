@@ -485,29 +485,17 @@ func Return(data TransitionData, index int, reward int) float64 {
 	return returnsum
 }
 
-func GetReturns(steps []StepData, ppo PPO) (finalreturns []float64) {
-	var returns []float64
+func GetReturns(steps []StepData, ppo PPO) []float64 {
+    returns := make([]float64, len(steps))
 	gamma := 0.99
-	returnvalue := 0.0
 	returnsum := 0.0
-
+    
 	for t := len(steps) - 1; t >= 0; t-- {
-		if t == len(steps)-1 {
-			returnvalue = float64(steps[t].Reward)
-			returnsum = returnvalue
-			returns = append(returns, returnsum)
-		} else {
-			returnvalue = float64(steps[t].Reward) + (gamma * returnsum)
-			returnsum = returnvalue
-			returns = append(returns, returnsum)
-		}
+			returnsum = float64(steps[t].Reward) + (gamma * returnsum)
+            returns[t] = returnsum
 	}
 
-	for j := len(returns) - 1; j >= 0; j-- {
-		finalreturns = append(finalreturns, returns[j])
-	}
-
-	return finalreturns
+	return returns 
 }
 
 func GetAdvantage(steps []StepData, ppo PPO, returns []float64) (advantages []float64) {
@@ -692,7 +680,6 @@ func (v *ValuesNetwork) HiddenLayer(input int) (vector []float64) {
 		logit := (float64(input) * neuron.Weights[0]) + neuron.Bias
 		vector = append(vector, math.Tanh(logit))
 	}
-
 	return vector
 }
 
