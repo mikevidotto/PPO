@@ -147,7 +147,7 @@ func SaveIfChanged(ppo PPO) error {
 }
 
 func GetValuesGradients(data TransitionData, ppo PPO) (hidden, output []float64) {
-    
+
 	return hidden, output
 }
 
@@ -486,16 +486,16 @@ func Return(data TransitionData, index int, reward int) float64 {
 }
 
 func GetReturns(steps []StepData, ppo PPO) []float64 {
-    returns := make([]float64, len(steps))
+	returns := make([]float64, len(steps))
 	gamma := 0.99
 	returnsum := 0.0
-    
+
 	for t := len(steps) - 1; t >= 0; t-- {
-			returnsum = float64(steps[t].Reward) + (gamma * returnsum)
-            returns[t] = returnsum
+		returnsum = float64(steps[t].Reward) + gamma*returnsum
+		returns[t] = returnsum
 	}
 
-	return returns 
+	return returns
 }
 
 func GetAdvantage(steps []StepData, ppo PPO, returns []float64) (advantages []float64) {
