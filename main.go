@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"github.com/mikevidotto/ff/ff"
+    "github.com/inancgumus/screen"
 	"log"
 	"math"
 	"math/rand"
@@ -90,12 +91,13 @@ func main() {
 	if *run {
 		fmt.Println("running the current policy")
 		_ = RunEpisode(ppo, *run)
+        SaveIfChanged(ppo)
 	} else if *train > 0 {
 		fmt.Printf("training current policy with %d epochs.\n", *train)
 		var rewardsums []int
 		wincount := 0
-        loops := *train
-        
+		loops := *train
+
 		for i := range *train {
 			EpisodeData := RunEpisode(ppo, *run)
 
@@ -103,11 +105,14 @@ func main() {
 
 			SaveIfChanged(ppo)
 
+            fmt.Printf("%d:", i)
 			if EpisodeData.Steps[len(EpisodeData.Steps)-1].State == 50 {
 				fmt.Printf("%d -> %d: ", EpisodeData.Steps[0].State, EpisodeData.Steps[len(EpisodeData.Steps)-1].State)
 				fmt.Printf("Winner!\n")
 				wincount++
+                screen.Clear()
 			} else {
+				fmt.Printf("Loser!\n")
 			}
 
 			if (i % 100) == 0 {
@@ -132,7 +137,7 @@ func main() {
 
 			SaveIfChanged(updatedPPO)
 		}
-        fmt.Printf("In %d epochs, the agent won %d times. Win percentage: %f", *train, wincount, float64(float64(wincount)/ float64(loops)))
+		fmt.Printf("In %d epochs, the agent won %d times. Win percentage: %f", *train, wincount, float64(float64(wincount)/float64(loops)))
 
 	}
 }
