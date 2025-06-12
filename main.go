@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"github.com/inancgumus/screen"
 	"github.com/mikevidotto/ff/ff"
-    "github.com/inancgumus/screen"
 	"log"
 	"math"
 	"math/rand"
@@ -29,6 +29,7 @@ type TransitionData struct {
 
 type StepData struct {
 	StateValue              float64
+	ValueLogits             []float64
 	State                   int
 	Action                  int
 	ActionProbability       float64
@@ -91,7 +92,7 @@ func main() {
 	if *run {
 		fmt.Println("running the current policy")
 		_ = RunEpisode(ppo, *run)
-        SaveIfChanged(ppo)
+		SaveIfChanged(ppo)
 	} else if *train > 0 {
 		fmt.Printf("training current policy with %d epochs.\n", *train)
 		var rewardsums []int
@@ -105,12 +106,12 @@ func main() {
 
 			SaveIfChanged(ppo)
 
-            fmt.Printf("%d:", i)
+			fmt.Printf("%d:", i)
 			if EpisodeData.Steps[len(EpisodeData.Steps)-1].State == 50 {
 				fmt.Printf("%d -> %d: ", EpisodeData.Steps[0].State, EpisodeData.Steps[len(EpisodeData.Steps)-1].State)
 				fmt.Printf("Winner!\n")
 				wincount++
-                screen.Clear()
+				screen.Clear()
 			} else {
 				fmt.Printf("Loser!\n")
 			}
@@ -163,6 +164,18 @@ func SaveIfChanged(ppo PPO) error {
 }
 
 func GetValuesGradients(data TransitionData, ppo PPO) (hidden, output []float64) {
+    var outputgradients [][]float64
+	//output layer weights
+	for _, step := range data.Steps {
+		var stepvalues []float64
+		for _, logit := range step.ValueLogits {
+			losswrtweight := (step.StateValue - step.Return) * math.Tanh(logit)
+			stepvalues = append(stepvalues, losswrtweight)
+		}
+        outputgradients = append(outputgradients, stepvalues)
+	}
+
+	//hidden layer weights
 
 	return hidden, output
 }
@@ -296,7 +309,8 @@ func RunEpisode(ppo PPO, run bool) (data TransitionData) {
 			step.DistanceToTarget = target - env.PlayerPosition
 			step.Reward = -1
 
-			step.StateValue = ppo.Values.OutputLayer(ppo.Values.HiddenLayer(env.PlayerPosition))
+			step.ValueLogits = ppo.Values.HiddenLayer(env.PlayerPosition)
+			step.StateValue = ppo.Values.OutputLayer(step.ValueLogits)
 			step.HiddenValues = ppo.Policy.HiddenLayer(env.PlayerPosition)
 			step.OutputLogits = ppo.Policy.OutputLayer(step.HiddenValues)
 			step.ProbabilityDistribution = Softmax(step.OutputLogits)
@@ -448,6 +462,7 @@ func (td *TransitionData) AddReturnsAdvantages(returns, advantages []float64) (u
 		tempstep := step
 		newstep := StepData{
 			StateValue:              tempstep.StateValue,
+			ValueLogits:             tempstep.ValueLogits,
 			State:                   tempstep.State,
 			Action:                  tempstep.Action,
 			ActionProbability:       tempstep.ActionProbability,
