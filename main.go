@@ -146,6 +146,10 @@ func main() {
 func GetPolicyGradients(EpisodeData TransitionData, ppo PPO) (hidden, output []float64) {
 	hidden = GetHiddenGradients(EpisodeData, ppo)
 	output = GetOutputGradients(EpisodeData, ppo)
+    
+    //check if hidden/output was not initialized?
+    //create a gradients struct so that you can return one struct with an error?
+
 	return hidden, output
 }
 
@@ -164,7 +168,7 @@ func SaveIfChanged(ppo PPO) error {
 }
 
 func GetValuesGradients(data TransitionData, ppo PPO) (hidden, output []float64) {
-    var outputgradients [][]float64
+	var outputgradients [][]float64
 	//output layer weights
 	for _, step := range data.Steps {
 		var stepvalues []float64
@@ -172,7 +176,7 @@ func GetValuesGradients(data TransitionData, ppo PPO) (hidden, output []float64)
 			losswrtweight := (step.StateValue - step.Return) * math.Tanh(logit)
 			stepvalues = append(stepvalues, losswrtweight)
 		}
-        outputgradients = append(outputgradients, stepvalues)
+		outputgradients = append(outputgradients, stepvalues)
 	}
 
 	//hidden layer weights

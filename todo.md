@@ -1,3 +1,9 @@
+---
+id: todo
+aliases: []
+tags: []
+---
+
 # TODO
 
 - [ ] optimize the values network
@@ -8,3 +14,10 @@
         - [ ] ask about loss w.r.t. biases
         - [ ] average the gradients
         - [ ] apply them to current values network using the learning rate
+
+- [ ] modularize methods into their own packages so that there isn't just one huge main.go file.
+    - [ ] create a folder structure
+    - [ ] put models into each of their own locations
+    - [ ] environment
+    - [ ] networks
+    - [ ] transition data
