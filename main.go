@@ -140,7 +140,9 @@ func main() {
 		}
 		fmt.Printf("In %d epochs, the agent won %d times. Win percentage: %f", *train, wincount, float64(float64(wincount)/float64(loops)))
 
-	}
+	} else {
+        fmt.Println("Try go run .\n\n<-r>  run an episode of the current policy\neg. go run . -r\n\n<-t> <number (n)> train the current policy for n number of loops\n eg. go run . -t 1000 ")
+    }
 }
 
 func GetPolicyGradients(EpisodeData TransitionData, ppo PPO) (hidden, output []float64) {
